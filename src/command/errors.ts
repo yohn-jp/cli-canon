@@ -13,8 +13,13 @@ export interface CanonConstructionIssue {
   readonly message: string;
 }
 
-/** Pure construction failure: no command handler has run when this is thrown. */
-export declare class CanonConstructionError extends Error {
-  readonly code: "CANON_CONSTRUCTION_FAILED";
+export class CanonConstructionError extends Error {
+  readonly code = "CANON_CONSTRUCTION_FAILED" as const;
   readonly issues: readonly CanonConstructionIssue[];
+
+  constructor(issues: readonly CanonConstructionIssue[]) {
+    super(issues.map((issue) => issue.message).join("; "));
+    this.name = "CanonConstructionError";
+    this.issues = Object.freeze([...issues]);
+  }
 }

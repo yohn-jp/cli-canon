@@ -1,7 +1,6 @@
 import type { CommandCatalog } from "../command/model.js";
 import type { CompiledProduct } from "../command/compiler.js";
 
-/** JSON-safe projection. Schemas, handlers, closures, and secrets are omitted. */
 export interface CommandDiscovery {
   readonly id: string;
   readonly route: readonly string[];
@@ -12,6 +11,7 @@ export interface CommandDiscovery {
     readonly flag?: string;
     readonly aliases?: readonly string[];
     readonly repeatable?: boolean;
+    readonly required?: boolean;
     readonly placement?: "after-route" | "anywhere";
     readonly metavar?: string;
   }[];
@@ -22,6 +22,19 @@ export interface ProductDiscovery {
   readonly commands: readonly CommandDiscovery[];
 }
 
-export declare function projectDiscovery<const Catalog extends CommandCatalog>(
+export function projectDiscovery<const Catalog extends CommandCatalog>(
   product: CompiledProduct<Catalog>,
-): ProductDiscovery;
+): ProductDiscovery {
+  return {
+    name: product.name,
+    commands: product.commands.map((command) => ({
+      id: command.id,
+      route: [...command.route],
+      summary: command.summary,
+      fields: command.fields.map((field) => ({
+        ...field,
+        ...(field.aliases === undefined ? {} : { aliases: [...field.aliases] }),
+      })),
+    })),
+  };
+}

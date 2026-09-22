@@ -7,17 +7,14 @@ import type {
   RawArgsField,
 } from "./model.js";
 
-/**
- * Typed field constructors. Their runtime implementation will remain trivial:
- * they create immutable declarations and perform local shape validation only.
- */
 export interface PositionalConfig {
   readonly metavar?: string;
 }
 
-export interface OptionConfig<Repeatable extends boolean = false> {
+export interface OptionConfig<Repeatable extends boolean = false, Required extends boolean = false> {
   readonly aliases?: readonly string[];
   readonly repeatable?: Repeatable;
+  readonly required?: Required;
   readonly placement?: OptionPlacement;
   readonly metavar?: string;
 }
@@ -27,23 +24,51 @@ export interface FlagConfig {
   readonly placement?: OptionPlacement;
 }
 
-export declare function positional<const Schema extends z.ZodType>(
-  schema: Schema,
-  config?: PositionalConfig,
-): PositionalField<Schema>;
+function freezeAliases(aliases: readonly string[] | undefined): readonly string[] {
+  return Object.freeze([...(aliases ?? [])]);
+}
 
-export declare function option<
+export function positional<const Schema extends z.ZodType>(
+  schema: Schema,
+  config: PositionalConfig = {},
+): PositionalField<Schema> {
+  return Object.freeze({
+    kind: "positional",
+    schema,
+    ...(config.metavar === undefined ? {} : { metavar: config.metavar }),
+  });
+}
+
+export function option<
   const Schema extends z.ZodType,
   const Repeatable extends boolean = false,
+  const Required extends boolean = false,
 >(
   flag: `--${string}`,
   schema: Schema,
-  config?: OptionConfig<Repeatable>,
-): OptionField<Schema, Repeatable>;
+  config: OptionConfig<Repeatable, Required> = {},
+): OptionField<Schema, Repeatable, Required> {
+  return Object.freeze({
+    kind: "option",
+    flag,
+    aliases: freezeAliases(config.aliases),
+    schema,
+    repeatable: (config.repeatable ?? false) as Repeatable,
+    required: (config.required ?? false) as Required,
+    placement: config.placement ?? "after-route",
+    ...(config.metavar === undefined ? {} : { metavar: config.metavar }),
+  });
+}
 
-export declare function flag(
-  name: `--${string}`,
-  config?: FlagConfig,
-): FlagField;
+export function flag(name: `--${string}`, config: FlagConfig = {}): FlagField {
+  return Object.freeze({
+    kind: "flag",
+    flag: name,
+    aliases: freezeAliases(config.aliases),
+    placement: config.placement ?? "after-route",
+  });
+}
 
-export declare function rawArgs(): RawArgsField;
+export function rawArgs(): RawArgsField {
+  return Object.freeze({ kind: "raw-args", afterDoubleDash: true });
+}

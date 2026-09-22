@@ -1,12 +1,5 @@
 import type * as z from "zod";
 
-/**
- * M0 authoring model.
- *
- * These types define the single declaration graph from which routing, handler
- * input, help, and discovery will be derived. Runtime implementation belongs
- * in later commits; this file intentionally contains no parser or I/O.
- */
 export type AnySchema = z.ZodType;
 export type OptionPlacement = "after-route" | "anywhere";
 
@@ -19,12 +12,14 @@ export interface PositionalField<Schema extends AnySchema = AnySchema> {
 export interface OptionField<
   Schema extends AnySchema = AnySchema,
   Repeatable extends boolean = boolean,
+  Required extends boolean = boolean,
 > {
   readonly kind: "option";
   readonly flag: `--${string}`;
   readonly aliases: readonly string[];
   readonly schema: Schema;
   readonly repeatable: Repeatable;
+  readonly required: Required;
   readonly placement: OptionPlacement;
   readonly metavar?: string;
 }
@@ -41,12 +36,7 @@ export interface RawArgsField {
   readonly afterDoubleDash: true;
 }
 
-export type FieldDefinition =
-  | PositionalField
-  | OptionField
-  | FlagField
-  | RawArgsField;
-
+export type FieldDefinition = PositionalField | OptionField | FlagField | RawArgsField;
 export type InputDefinition = Readonly<Record<string, FieldDefinition>>;
 
 export interface CommandDefinition<
@@ -64,10 +54,12 @@ export type CommandCatalog = Readonly<Record<string, CommandDefinition>>;
 export type FieldOutput<Field extends FieldDefinition> =
   Field extends PositionalField<infer Schema>
     ? z.output<Schema>
-    : Field extends OptionField<infer Schema, infer Repeatable>
+    : Field extends OptionField<infer Schema, infer Repeatable, infer Required>
       ? Repeatable extends true
         ? readonly z.output<Schema>[]
-        : z.output<Schema> | undefined
+        : Required extends true
+          ? z.output<Schema>
+          : z.output<Schema> | undefined
       : Field extends FlagField
         ? boolean
         : Field extends RawArgsField
@@ -78,15 +70,6 @@ export type CommandInput<Command extends CommandDefinition> = {
   readonly [Key in keyof Command["input"]]: FieldOutput<Command["input"][Key]>;
 };
 
-export type CommandResultInput<Command extends CommandDefinition> = z.input<
-  Command["result"]
->;
-
-export type CommandResultOutput<Command extends CommandDefinition> = z.output<
-  Command["result"]
->;
-
-export type CommandId<Catalog extends CommandCatalog> = Extract<
-  keyof Catalog,
-  string
->;
+export type CommandResultInput<Command extends CommandDefinition> = z.input<Command["result"]>;
+export type CommandResultOutput<Command extends CommandDefinition> = z.output<Command["result"]>;
+export type CommandId<Catalog extends CommandCatalog> = Extract<keyof Catalog, string>;
