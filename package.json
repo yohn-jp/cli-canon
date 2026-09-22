@@ -1,0 +1,47 @@
+{
+  "name": "@yohn-jp/cli-canon",
+  "version": "0.1.0",
+  "description": "Internal canonical TypeScript framework for yohn-jp CLI products.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/runtime/*.test.mjs",
+    "test:types": "tsc -p test/types/tsconfig.json --noEmit",
+    "test:package": "node test/package/consumer.mjs",
+    "verify": "pnpm run typecheck && pnpm run test:types && pnpm run build && pnpm test && pnpm run test:package",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "commander": "15.0.0"
+  },
+  "peerDependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "zod": "4.6.5"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.18.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "license": "MIT"
+}

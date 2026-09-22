@@ -1,13 +1,72 @@
 # cli-canon
 
-`@yohn-jp/cli-canon` — yohn-jpのTypeScript CLI製品向け内部framework。
+`@yohn-jp/cli-canon` is the internal TypeScript CLI framework for yohn-jp products.
 
-各事実の所有者を一つに固定し、型付きの宣言を検証済みProduct Modelへ変換して、実行・help・Skill・機械可読契約へ投射する。
+The M0 contract defines one typed Command Canon and derives handler input types,
+routing, text help, and machine-readable discovery from that declaration.
 
-## 設計
+## M0
 
-[アーキテクチャ設計書](docs/architecture/cli-canon.md)
+```ts
+import * as z from "zod";
+import {
+  bindHandlers,
+  compileProduct,
+  defineCommands,
+  flag,
+  option,
+  positional,
+} from "@yohn-jp/cli-canon";
+import { runNodeCli } from "@yohn-jp/cli-canon/node";
 
-Inari、Nawabari、Wabachi、Suzukuri、Mottainaiの固定commitを分析し、共通化するCanon、製品側に残す責務、Effectを含む基盤比較、型・実行時の保証範囲、fixtureと配布物検証、段階的な移行条件を整理している。
+const commands = defineCommands({
+  "document.render": {
+    route: ["document", "render"],
+    summary: "Render a document.",
+    input: {
+      file: positional(z.string()),
+      out: option("--out", z.string(), { required: true }),
+      json: flag("--json"),
+    },
+    result: z.object({ writtenFile: z.string() }),
+  },
+});
 
-設計は **Proposed**。runtime実装、consumer移行、npm publishはこの設計提出の範囲に含めない。
+const handlers = bindHandlers(commands)({
+  "document.render": ({ out }) => ({ writtenFile: out }),
+});
+
+const product = compileProduct({ name: "example", commands, handlers });
+const result = await runNodeCli(product, [
+  "document",
+  "render",
+  "input.md",
+  "--out",
+  "out.html",
+]);
+```
+
+Commander is private to the Node adapter. Zod schemas are the runtime validation
+authority for framework-owned values.
+
+### M0 grammar boundary
+
+M0 supports nested routes, required positionals, flags, required/optional value
+options, aliases, repeated options, `--name=value`, product-root options
+declared with `placement: "anywhere"`, and a trailing `rawArgs()` field.
+
+Ordered option groups such as Nawabari's repeated
+`--resource <path> --mode <mode>` pairs are deliberately **not admitted in
+M0**. The framework does not flatten such a grammar and does not claim it is
+supported yet.
+
+Commander semantics are retained for an option-looking token used as the value
+of a required option: `--out --json` binds `"--json"` as the value of
+`--out`. Products such as Mottainai that intentionally reject that form need
+an explicit later grammar primitive; M0 does not silently emulate it with a
+second parser.
+
+## Architecture references
+
+- [Canonical architecture reference](docs/architecture/CANON.md) — normative rules for implementation agents and consumers.
+- [Architecture design and cross-product analysis](docs/architecture/cli-canon.md) — rationale, source analysis, and migration design.
