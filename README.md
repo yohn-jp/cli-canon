@@ -66,6 +66,7 @@ of a required option: `--out --json` binds `"--json"` as the value of
 an explicit later grammar primitive; M0 does not silently emulate it with a
 second parser.
 
-## Design
+## Architecture references
 
-See [the architecture design](docs/architecture/cli-canon.md).
+- [Canonical architecture reference](docs/architecture/CANON.md) — normative rules for implementation agents and consumers.
+- [Architecture design and cross-product analysis](docs/architecture/cli-canon.md) — rationale, source analysis, and migration design.
