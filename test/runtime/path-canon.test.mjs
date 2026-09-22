@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { bindHandlers, compileProduct, defineCommands } from "../../dist/index.js";
 import {
   PathConstructionError,
   PathResolutionError,
@@ -7,6 +8,13 @@ import {
   definePaths,
   resolvePaths,
 } from "../../dist/path/index.js";
+
+test("compileProduct includes validated canonical paths", () => {
+  const commands = defineCommands({});
+  const paths = definePaths({ project: { root: "cwd", segments: ["project"] } });
+  const product = compileProduct({ name: "fixture", commands, handlers: bindHandlers(commands)({}), paths });
+  assert.equal(resolvePaths(product.paths, { platform: "posix", cwd: "/work" }).project, "/work/project");
+});
 
 test("path IDs and parent references resolve from explicit platform context", () => {
   const paths = definePaths({

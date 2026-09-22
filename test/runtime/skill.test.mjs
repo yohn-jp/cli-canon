@@ -10,7 +10,6 @@ import {
   positional,
 } from "../../dist/index.js";
 import {
-  compileSkills,
   defineSkills,
   projectSkill,
   projectSkills,
@@ -42,7 +41,6 @@ function fixture() {
     "document.render": ({ out }) => ({ writtenFile: out }),
     "document.list": () => ({ count: 0 }),
   });
-  const product = compileProduct({ name: "fixture", commands, handlers });
   const skills = defineSkills({
     "document.review": {
       summary: "Prepare a document for review.",
@@ -66,7 +64,7 @@ function fixture() {
       steps: [{ kind: "prose", text: "Verify the document with its owner." }],
     },
   });
-  return { ...product, skills: compileSkills(skills, product.commands) };
+  return compileProduct({ name: "fixture", commands, handlers, skills });
 }
 
 test("Skill projection derives command metadata and preserves prose steps", () => {
@@ -117,7 +115,6 @@ test("Skill JSON projection is deterministic, valid, and keeps long content inta
 });
 
 test("Skill compilation rejects unknown command references at construction", () => {
-  const product = fixture();
   const invalid = {
     broken: {
       summary: "Invalid reference.",
@@ -125,7 +122,14 @@ test("Skill compilation rejects unknown command references at construction", () 
     },
   };
   assert.throws(
-    () => compileSkills(invalid, product.commands),
+    () => compileProduct({
+      name: "fixture",
+      commands: defineCommands({
+        list: { route: ["list"], summary: "List.", input: {}, result: z.object({ count: z.number() }) },
+      }),
+      handlers: { list: () => ({ count: 0 }) },
+      skills: invalid,
+    }),
     (error) => error instanceof SkillConstructionError
       && error.issues[0]?.code === "UNKNOWN_COMMAND_REFERENCE"
       && error.issues[0]?.commandId === "document.missing",

@@ -1,5 +1,7 @@
 import * as z from "zod";
 import { defineCommands } from "../../src/command/commands.js";
+import { compileProduct } from "../../src/command/compiler.js";
+import { bindHandlers } from "../../src/command/handlers.js";
 import { flag, option, positional } from "../../src/command/fields.js";
 import type { CommandId } from "../../src/command/model.js";
 import { defineSkills, type SkillCatalog, type SkillId } from "../../src/skill/model.js";
@@ -42,6 +44,11 @@ void invalidId;
 
 const checkedSkills: SkillCatalog<Commands> = skills;
 void checkedSkills;
+const handlers = bindHandlers(commands)({
+  "document.render": ({ out }) => ({ writtenFile: out }),
+});
+const compiledProduct = compileProduct({ name: "fixture", commands, handlers, skills });
+compiledProduct.skills[0]?.id satisfies SkillId<typeof skills> | undefined;
 
 const badSkills = defineSkills({
   broken: {
@@ -52,6 +59,8 @@ const badSkills = defineSkills({
 // @ts-expect-error Command step IDs must belong to the Command Canon.
 const invalidReferences: SkillCatalog<Commands> = badSkills;
 void invalidReferences;
+// @ts-expect-error compileProduct rejects Skill references outside the command catalog.
+compileProduct({ name: "fixture", commands, handlers, skills: badSkills });
 
 const proseOnlySkills = defineSkills({
   guide: { summary: "Guidance without a command.", steps: [{ kind: "prose", text: "Read this first." }] },
