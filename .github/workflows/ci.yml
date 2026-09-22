@@ -18,6 +18,6 @@ jobs:
           node-version: '24'
           package-manager-cache: false
       - run: corepack enable
-      - run: corepack prepare pnpm@12.5.1 --activate
+      - run: corepack prepare pnpm@11.18.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
