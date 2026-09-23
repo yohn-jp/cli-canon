@@ -1,6 +1,5 @@
 import * as z from "zod";
 import type { CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog } from "../command/model.js";
 
 export type SchemaProjectionCompleteness = "complete" | "structural-only";
 export type SchemaProjectionIO = "input" | "output";
@@ -22,8 +21,8 @@ export interface CommandSchemaProjection {
   readonly output: SchemaProjection;
 }
 
-export interface SchemaProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
-  readonly commands: CompiledProduct<Catalog>["commands"];
+export interface SchemaProjectionProduct {
+  readonly commands: readonly import("../command/compiler.js").CompiledCommand[];
 }
 
 const JSON_SCHEMA_CHECKS = [
@@ -106,8 +105,8 @@ export function projectSchema<Schema extends z.ZodType>(
 }
 
 /** Project every declared input value schema and handler result schema from a compiled product. */
-export function projectProductSchemas<const Catalog extends CommandCatalog>(
-  product: SchemaProjectionProduct<Catalog>,
+export function projectProductSchemas(
+  product: SchemaProjectionProduct,
   completeness: SchemaProjectionCompleteness,
 ): readonly CommandSchemaProjection[] {
   return Object.freeze(product.commands.map((command) => {
