@@ -59,6 +59,45 @@ function fixture() {
   return compileProduct({ name: "fixture", commands, handlers });
 }
 
+function helpFixture() {
+  const commands = defineCommands({
+    "document.inspect": {
+      route: ["document", "inspect"],
+      summary: "Inspect an input file.",
+      description: "Read the file and report the selected detail level.",
+      examples: ["fixture document inspect input.txt --format=full"],
+      input: {
+        file: positional(z.string().min(1), { metavar: "file", description: "Input file." }),
+        target: positional(z.string(), { required: false, description: "Optional destination." }),
+        format: option("--format", z.enum(["full", "json"]), {
+          valueArity: "optional",
+          metavar: "style",
+          description: "Choose an optional detail level.",
+        }),
+      },
+      result: z.object({ file: z.string(), target: z.string().optional(), format: z.string().optional() }),
+    },
+    "domain.list": {
+      route: ["domain", "list"],
+      summary: "List domain records.",
+      input: {},
+      result: z.object({}),
+    },
+    "domain.show": {
+      route: ["domain", "show"],
+      summary: "Show one domain record.",
+      input: { id: positional(z.string()) },
+      result: z.object({}),
+    },
+  });
+  const handlers = bindHandlers(commands)({
+    "document.inspect": ({ file, target, format }) => ({ file, target, format }),
+    "domain.list": () => ({}),
+    "domain.show": () => ({}),
+  });
+  return compileProduct({ name: "fixture", commands, handlers });
+}
+
 test("one command canon drives routing, validation, result validation, and output", async () => {
   const result = await runNodeCli(fixture(), [
     "document",
@@ -126,12 +165,23 @@ test("option-looking tokens are consumed as required option values by the M0 gra
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).writtenFile, "--json");
   assert.equal(JSON.parse(result.stdout).json, false);
+
+  const helpAsValue = await runNodeCli(fixture(), [
+    "document",
+    "render",
+    "input.md",
+    "--out",
+    "--help",
+  ]);
+  assert.equal(helpAsValue.exitCode, 0);
+  assert.equal(JSON.parse(helpAsValue.stdout).writtenFile, "--help");
 });
 
 test("text help and JSON discovery are projections of the compiled product", async () => {
   const product = fixture();
   const help = renderHelp(product);
-  assert.match(help, /document render/);
+  assert.match(help, /document\t/);
+  assert.match(renderHelp(product, { kind: "route", route: ["document"] }), /render\t/);
   assert.match(renderHelp(product, { kind: "command", commandId: "document.render" }), /--out/);
   const discovery = projectDiscovery(product);
   assert.equal(
@@ -141,6 +191,94 @@ test("text help and JSON discovery are projections of the compiled product", asy
   const jsonHelp = await runNodeCli(product, ["--help"], { helpFormat: "json" });
   assert.equal(jsonHelp.exitCode, 0);
   assert.deepEqual(JSON.parse(jsonHelp.stdout), discovery);
+});
+
+test("optional positional and optional-value option grammar reaches handlers", async () => {
+  const product = helpFixture();
+  const absent = await runNodeCli(product, ["document", "inspect", "input.txt"]);
+  assert.equal(absent.exitCode, 0);
+  assert.deepEqual(JSON.parse(absent.stdout), { file: "input.txt" });
+
+  const supplied = await runNodeCli(product, ["document", "inspect", "input.txt", "target.txt", "--format=full"]);
+  assert.equal(supplied.exitCode, 0);
+  assert.deepEqual(JSON.parse(supplied.stdout), {
+    file: "input.txt",
+    target: "target.txt",
+    format: "full",
+  });
+
+  const separated = await runNodeCli(product, ["document", "inspect", "input.txt", "--format", "json"]);
+  assert.equal(separated.exitCode, 0);
+  assert.deepEqual(JSON.parse(separated.stdout), { file: "input.txt", format: "json" });
+
+  const valueless = await runNodeCli(product, ["document", "inspect", "input.txt", "--format"]);
+  assert.equal(valueless.exitCode, 0);
+  assert.deepEqual(JSON.parse(valueless.stdout), { file: "input.txt" });
+});
+
+test("progressive text, full, and JSON help share command canon metadata", async () => {
+  const product = helpFixture();
+  assert.equal(
+    renderHelp(product),
+    "Usage: fixture <command>\n\nCommands:\n  document\tInspect an input file.\n  domain\tList domain records.\n\nHelp: --help[=full|json]\n",
+  );
+  assert.equal(
+    renderHelp(product, { kind: "route", route: ["domain"] }),
+    "Usage: fixture domain <command>\n\nCommands:\n  list\tList domain records.\n  show\tShow one domain record.\n\nHelp: --help[=full|json]\n",
+  );
+  assert.equal(
+    renderHelp(product, { kind: "command", commandId: "document.inspect", mode: "full" }),
+    "Usage: fixture document inspect <file> [<target>] [--format[=<style>]]\n\nInspect an input file.\n\nRead the file and report the selected detail level.\n\nArguments:\n  <file>\tInput file.\n  [<target>]\tOptional destination.\nOptions:\n  [--format[=<style>]]\tChoose an optional detail level.\n\nExamples:\n  fixture document inspect input.txt --format=full\n\nHelp: --help[=full|json]\n",
+  );
+
+  const full = await runNodeCli(product, ["document", "inspect", "--help=full"]);
+  assert.equal(full.exitCode, 0);
+  assert.match(full.stdout, /Optional destination\./);
+  assert.match(full.stdout, /fixture document inspect input\.txt --format=full/);
+
+  const json = await runNodeCli(product, ["--help=json", "document", "inspect"]);
+  assert.equal(json.exitCode, 0);
+  assert.deepEqual(JSON.parse(json.stdout), {
+    name: "fixture",
+    commands: [{
+      id: "document.inspect",
+      route: ["document", "inspect"],
+      summary: "Inspect an input file.",
+      description: "Read the file and report the selected detail level.",
+      examples: ["fixture document inspect input.txt --format=full"],
+      fields: [
+        {
+          key: "file",
+          kind: "positional",
+          required: true,
+          description: "Input file.",
+          metavar: "file",
+        },
+        {
+          key: "target",
+          kind: "positional",
+          required: false,
+          description: "Optional destination.",
+        },
+        {
+          key: "format",
+          kind: "option",
+          flag: "--format",
+          aliases: [],
+          placement: "after-route",
+          description: "Choose an optional detail level.",
+          repeatable: false,
+          required: false,
+          valueArity: "optional",
+          optionLookingValuePolicy: "consume",
+          metavar: "style",
+        },
+      ],
+    }],
+  });
+
+  const domainJson = await runNodeCli(product, ["domain", "--help=json"]);
+  assert.deepEqual(JSON.parse(domainJson.stdout).commands.map((command) => command.id), ["domain.list", "domain.show"]);
 });
 
 test("result schema rejects a handler result that violates its declared contract", async () => {
@@ -201,5 +339,42 @@ test("compileProduct rejects duplicate routes and conflicting anywhere flags", (
     (error) =>
       error instanceof CanonConstructionError &&
       error.issues.some((issue) => issue.code === "FLAG_COLLISION"),
+  );
+});
+
+test("unsupported ordered groups and option-looking-value rejection fail during construction", () => {
+  const ordered = defineCommands({
+    apply: {
+      route: ["apply"],
+      summary: "Apply ordered changes.",
+      input: {
+        resource: option("--resource", z.string(), { repeatable: true }),
+        mode: option("--mode", z.string(), { repeatable: true }),
+      },
+      orderedOptionGroups: [["resource", "mode"]],
+      result: z.object({}),
+    },
+  });
+  assert.throws(
+    () => compileProduct({ name: "fixture", commands: ordered, handlers: { apply: () => ({}) } }),
+    (error) => error instanceof CanonConstructionError &&
+      error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" &&
+        issue.fields?.join(",") === "resource,mode"),
+  );
+
+  const optionLooking = defineCommands({
+    run: {
+      route: ["run"],
+      summary: "Run with an explicit option value.",
+      input: {
+        value: option("--value", z.string(), { optionLookingValuePolicy: "reject" }),
+      },
+      result: z.object({}),
+    },
+  });
+  assert.throws(
+    () => compileProduct({ name: "fixture", commands: optionLooking, handlers: { run: () => ({}) } }),
+    (error) => error instanceof CanonConstructionError &&
+      error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" && issue.field === "value"),
   );
 });

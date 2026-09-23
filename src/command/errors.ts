@@ -10,6 +10,7 @@ export interface CanonConstructionIssue {
   readonly code: CanonConstructionErrorCode;
   readonly commandId?: string;
   readonly field?: string;
+  readonly fields?: readonly string[];
   readonly message: string;
 }
 
@@ -20,6 +21,9 @@ export class CanonConstructionError extends Error {
   constructor(issues: readonly CanonConstructionIssue[]) {
     super(issues.map((issue) => issue.message).join("; "));
     this.name = "CanonConstructionError";
-    this.issues = Object.freeze([...issues]);
+    this.issues = Object.freeze(issues.map((issue) => Object.freeze({
+      ...issue,
+      ...(issue.fields === undefined ? {} : { fields: Object.freeze([...issue.fields]) }),
+    })));
   }
 }

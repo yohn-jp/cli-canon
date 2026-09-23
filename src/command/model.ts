@@ -2,17 +2,26 @@ import type * as z from "zod";
 
 export type AnySchema = z.ZodType;
 export type OptionPlacement = "after-route" | "anywhere";
+export type OptionValueArity = "required" | "optional";
+export type OptionLookingValuePolicy = "consume" | "reject";
 
-export interface PositionalField<Schema extends AnySchema = AnySchema> {
+export interface PositionalField<
+  Schema extends AnySchema = AnySchema,
+  Required extends boolean = boolean,
+> {
   readonly kind: "positional";
   readonly schema: Schema;
+  readonly required: Required;
   readonly metavar?: string;
+  readonly description?: string;
 }
 
 export interface OptionField<
   Schema extends AnySchema = AnySchema,
   Repeatable extends boolean = boolean,
   Required extends boolean = boolean,
+  ValueArity extends OptionValueArity = OptionValueArity,
+  LookingValuePolicy extends OptionLookingValuePolicy = OptionLookingValuePolicy,
 > {
   readonly kind: "option";
   readonly flag: `--${string}`;
@@ -20,8 +29,11 @@ export interface OptionField<
   readonly schema: Schema;
   readonly repeatable: Repeatable;
   readonly required: Required;
+  readonly valueArity: ValueArity;
+  readonly optionLookingValuePolicy: LookingValuePolicy;
   readonly placement: OptionPlacement;
   readonly metavar?: string;
+  readonly description?: string;
 }
 
 export interface FlagField {
@@ -29,6 +41,7 @@ export interface FlagField {
   readonly flag: `--${string}`;
   readonly aliases: readonly string[];
   readonly placement: OptionPlacement;
+  readonly description?: string;
 }
 
 export interface RawArgsField {
@@ -45,20 +58,29 @@ export interface CommandDefinition<
 > {
   readonly route: readonly [string, ...string[]];
   readonly summary: string;
+  readonly description?: string;
+  readonly examples?: readonly string[];
   readonly input: Input;
   readonly result: Result;
+  /**
+   * Declares option occurrences whose relative argv order carries meaning.
+   * The current Commander adapter rejects these groups explicitly.
+   */
+  readonly orderedOptionGroups?: readonly (readonly Extract<keyof Input, string>[])[];
 }
 
 export type CommandCatalog = Readonly<Record<string, CommandDefinition>>;
 
 export type FieldOutput<Field extends FieldDefinition> =
-  Field extends PositionalField<infer Schema>
-    ? z.output<Schema>
-    : Field extends OptionField<infer Schema, infer Repeatable, infer Required>
+  Field extends PositionalField<infer Schema, infer Required>
+    ? Required extends true ? z.output<Schema> : z.output<Schema> | undefined
+    : Field extends OptionField<infer Schema, infer Repeatable, infer Required, infer ValueArity>
       ? Repeatable extends true
-        ? readonly z.output<Schema>[]
+        ? ValueArity extends "optional"
+          ? readonly (z.output<Schema> | undefined)[]
+          : readonly z.output<Schema>[]
         : Required extends true
-          ? z.output<Schema>
+          ? ValueArity extends "optional" ? z.output<Schema> | undefined : z.output<Schema>
           : z.output<Schema> | undefined
       : Field extends FlagField
         ? boolean

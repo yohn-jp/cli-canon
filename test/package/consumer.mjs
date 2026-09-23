@@ -71,20 +71,32 @@ try {
   writeFileSync(
     path.join(consumer, "consumer.ts"),
     `import * as z from "zod";
-import { bindHandlers, compileProduct, defineCommands, positional, type CommandId } from "@yohn-jp/cli-canon";
+import { bindHandlers, compileProduct, defineCommands, option, positional, type CommandId } from "@yohn-jp/cli-canon";
 import { runNodeCli } from "@yohn-jp/cli-canon/node";
 
 const commands = defineCommands({
   "example.echo": {
     route: ["echo"],
     summary: "Echo a message.",
-    input: { message: positional(z.string().min(1), { metavar: "message" }) },
-    result: z.object({ message: z.string() }),
+    description: "Write the supplied message and optional annotations.",
+    examples: ["fixture-cli echo hello --format=full"],
+    input: {
+      message: positional(z.string().min(1), { metavar: "message" }),
+      suffix: positional(z.string(), { required: false }),
+      format: option("--format", z.enum(["full", "json"]), { valueArity: "optional" }),
+    },
+    result: z.object({ message: z.string(), suffix: z.string().optional(), format: z.string().optional() }),
   },
 });
-const handlers = bindHandlers(commands)({ "example.echo": ({ message }) => ({ message }) });
+const handlers = bindHandlers(commands)({ "example.echo": ({ message, suffix, format }) => {
+  suffix satisfies string | undefined;
+  // @ts-expect-error optional positional input can be absent.
+  suffix.toUpperCase();
+  format satisfies "full" | "json" | undefined;
+  return { message, suffix, format };
+} });
 const product = compileProduct({ name: "fixture-cli", commands, handlers });
-void runNodeCli(product, ["echo", "typed package"]);
+void runNodeCli(product, ["echo", "typed package", "--format=full"]);
 type Id = CommandId<typeof commands>;
 const validId: Id = "example.echo";
 void validId;
