@@ -7,10 +7,7 @@ import {
   projectProductSchemas,
   type ProductPackageIdentity,
 } from "../../src/index.js";
-import {
-  certifyScenarios,
-  type CertificationScenario,
-} from "../../src/testing/index.js";
+import { certifyScenarios, type CertificationScenario } from "../../src/testing/index.js";
 
 const packageMetadata: ProductPackageIdentity = {
   name: "@example/fixture",
@@ -28,7 +25,13 @@ const commands = defineCommands({
 const handlers = bindHandlers(commands)({
   "fixture.read": ({ file }) => ({ contents: file }),
 });
-const compiled = compileProduct({ name: "fixture", packageMetadata, commands, handlers, schemaProjectionCompleteness: "complete" });
+const compiled = compileProduct({
+  name: "fixture",
+  packageMetadata,
+  commands,
+  handlers,
+  schemaProjectionCompleteness: "complete",
+});
 projectProductSchemas(compiled, "complete");
 
 const scenario: CertificationScenario<{ multiplier: number }, number, { value: string }, "fixture.read"> = {

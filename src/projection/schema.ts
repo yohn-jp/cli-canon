@@ -59,30 +59,34 @@ export function projectSchema<Schema extends z.ZodType>(
   schema: Schema,
   options: SchemaProjectionOptions,
 ): SchemaProjection {
-  const projectionOptions = options.completeness === "complete"
-    ? {
-        io: options.io,
-        unrepresentable: "throw" as const,
-        override: ({ zodSchema, path }: {
-          readonly zodSchema: z.core.$ZodTypes;
-          readonly path: (string | number)[];
-        }) => {
-          const unsupportedCheck = zodSchema._zod.def.checks?.find((check) =>
-            !JSON_SCHEMA_CHECKS.some((supported) => supported === check._zod.def.check),
-          );
-          if (unsupportedCheck !== undefined) {
-            throw new SchemaProjectionError(
-              options.io,
-              path,
-              `Complete ${options.io} schema projection does not support Zod check ${unsupportedCheck._zod.def.check}`,
+  const projectionOptions =
+    options.completeness === "complete"
+      ? {
+          io: options.io,
+          unrepresentable: "throw" as const,
+          override: ({
+            zodSchema,
+            path,
+          }: {
+            readonly zodSchema: z.core.$ZodTypes;
+            readonly path: (string | number)[];
+          }) => {
+            const unsupportedCheck = zodSchema._zod.def.checks?.find(
+              (check) => !JSON_SCHEMA_CHECKS.some((supported) => supported === check._zod.def.check),
             );
-          }
-        },
-      }
-    : {
-        io: options.io,
-        unrepresentable: "any" as const,
-      };
+            if (unsupportedCheck !== undefined) {
+              throw new SchemaProjectionError(
+                options.io,
+                path,
+                `Complete ${options.io} schema projection does not support Zod check ${unsupportedCheck._zod.def.check}`,
+              );
+            }
+          },
+        }
+      : {
+          io: options.io,
+          unrepresentable: "any" as const,
+        };
 
   try {
     return Object.freeze({
@@ -109,23 +113,25 @@ export function projectProductSchemas(
   product: SchemaProjectionProduct,
   completeness: SchemaProjectionCompleteness,
 ): readonly CommandSchemaProjection[] {
-  return Object.freeze(product.commands.map((command) => {
-    const inputEntries: [string, SchemaProjection][] = [];
-    for (const fieldKey of Object.keys(command.definition.input)) {
-      const field = command.definition.input[fieldKey];
-      if (field === undefined) continue;
-      if (field.kind === "positional" || field.kind === "option") {
-        inputEntries.push([fieldKey, projectSchema(field.schema, { io: "input", completeness })]);
-      } else if (field.kind === "flag") {
-        inputEntries.push([fieldKey, projectSchema(z.boolean(), { io: "input", completeness })]);
-      } else {
-        inputEntries.push([fieldKey, projectSchema(z.array(z.string()), { io: "input", completeness })]);
+  return Object.freeze(
+    product.commands.map((command) => {
+      const inputEntries: [string, SchemaProjection][] = [];
+      for (const fieldKey of Object.keys(command.definition.input)) {
+        const field = command.definition.input[fieldKey];
+        if (field === undefined) continue;
+        if (field.kind === "positional" || field.kind === "option") {
+          inputEntries.push([fieldKey, projectSchema(field.schema, { io: "input", completeness })]);
+        } else if (field.kind === "flag") {
+          inputEntries.push([fieldKey, projectSchema(z.boolean(), { io: "input", completeness })]);
+        } else {
+          inputEntries.push([fieldKey, projectSchema(z.array(z.string()), { io: "input", completeness })]);
+        }
       }
-    }
-    return Object.freeze({
-      commandId: command.id,
-      input: Object.freeze(Object.fromEntries(inputEntries)),
-      output: projectSchema(command.definition.result, { io: "output", completeness }),
-    });
-  }));
+      return Object.freeze({
+        commandId: command.id,
+        input: Object.freeze(Object.fromEntries(inputEntries)),
+        output: projectSchema(command.definition.result, { io: "output", completeness }),
+      });
+    }),
+  );
 }

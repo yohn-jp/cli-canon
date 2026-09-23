@@ -34,13 +34,19 @@ function helpFooter(): string {
   return "Help: --help[=full|json]";
 }
 
-function sortedCommands(
-  product: HelpProjectionProduct,
-): readonly ProjectionCommandSource[] {
+function sortedCommands(product: HelpProjectionProduct): readonly ProjectionCommandSource[] {
   return [...product.commands].sort((left, right) => {
     const leftRoute = left.route.join(" ");
     const rightRoute = right.route.join(" ");
-    return leftRoute < rightRoute ? -1 : leftRoute > rightRoute ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+    return leftRoute < rightRoute
+      ? -1
+      : leftRoute > rightRoute
+        ? 1
+        : left.id < right.id
+          ? -1
+          : left.id > right.id
+            ? 1
+            : 0;
   });
 }
 
@@ -85,19 +91,19 @@ function routeChildren(
 ): readonly { readonly segment: string; readonly command: ProjectionCommandSource }[] {
   const children = new Map<string, ProjectionCommandSource>();
   for (const command of sortedCommands(product)) {
-    if (route.length >= command.route.length || !route.every((segment, index) => command.route[index] === segment)) continue;
+    if (route.length >= command.route.length || !route.every((segment, index) => command.route[index] === segment))
+      continue;
     const segment = command.route[route.length];
     if (segment !== undefined && !children.has(segment)) children.set(segment, command);
   }
   return [...children.entries()].map(([segment, command]) => ({ segment, command }));
 }
 
-function renderRouteHelp(
-  product: HelpProjectionProduct,
-  route: readonly string[],
-  mode: HelpMode,
-): string {
-  const exact = product.commands.find((command) => command.route.length === route.length && command.route.every((segment, index) => route[index] === segment));
+function renderRouteHelp(product: HelpProjectionProduct, route: readonly string[], mode: HelpMode): string {
+  const exact = product.commands.find(
+    (command) =>
+      command.route.length === route.length && command.route.every((segment, index) => route[index] === segment),
+  );
   if (exact !== undefined) return renderCommandHelp(exact, product.name, mode);
 
   const children = routeChildren(product, route);
@@ -111,10 +117,7 @@ function renderRouteHelp(
   return lines.join("\n");
 }
 
-function renderRootHelp(
-  product: HelpProjectionProduct,
-  mode: HelpMode,
-): string {
+function renderRootHelp(product: HelpProjectionProduct, mode: HelpMode): string {
   const lines = [`Usage: ${product.name} <command>`, "", "Commands:"];
   for (const { segment, command } of routeChildren(product, [])) {
     lines.push(`  ${segment}\t${command.summary}`);
@@ -124,10 +127,7 @@ function renderRootHelp(
   return lines.join("\n");
 }
 
-export function renderHelp(
-  product: HelpProjectionProduct,
-  request: HelpRequest = { kind: "root" },
-): string {
+export function renderHelp(product: HelpProjectionProduct, request: HelpRequest = { kind: "root" }): string {
   const mode = request.mode ?? "text";
   if (request.kind === "command") {
     const command = product.commands.find((candidate) => candidate.id === request.commandId);
@@ -135,9 +135,7 @@ export function renderHelp(
     return renderCommandHelp(command, product.name, mode);
   }
   if (request.kind === "route") {
-    return request.route.length === 0
-      ? renderRootHelp(product, mode)
-      : renderRouteHelp(product, request.route, mode);
+    return request.route.length === 0 ? renderRootHelp(product, mode) : renderRouteHelp(product, request.route, mode);
   }
   return renderRootHelp(product, mode);
 }

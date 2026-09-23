@@ -51,29 +51,40 @@ test("canonical invocation lowers typed field bindings to executable and argv", 
     value: {
       executable: "fixture",
       argv: [
-        "deploy", "run", "input",
-        "--out", "out.html",
-        "--format", "full",
+        "deploy",
+        "run",
+        "input",
+        "--out",
+        "out.html",
+        "--format",
+        "full",
         "--json",
-        "--tag", "a",
-        "--tag", "b",
-        "--", "--literal", "tail",
+        "--tag",
+        "a",
+        "--tag",
+        "b",
+        "--",
+        "--literal",
+        "tail",
       ],
     },
   });
 
-  assert.deepEqual(projectInvocation(fixture(), "deploy.run", {
-    target: "input",
-    out: "out.html",
-    format: true,
-  }), {
-    state: "ready",
-    commandId: "deploy.run",
-    value: {
-      executable: "fixture",
-      argv: ["deploy", "run", "input", "--out", "out.html", "--format"],
+  assert.deepEqual(
+    projectInvocation(fixture(), "deploy.run", {
+      target: "input",
+      out: "out.html",
+      format: true,
+    }),
+    {
+      state: "ready",
+      commandId: "deploy.run",
+      value: {
+        executable: "fixture",
+        argv: ["deploy", "run", "input", "--out", "out.html", "--format"],
+      },
     },
-  });
+  );
 });
 
 test("missing required invocation bindings stay non-executable", () => {
@@ -104,8 +115,7 @@ test("invalid invocation bindings fail explicitly", () => {
   ]) {
     assert.throws(
       () => projectInvocation(product, "deploy.run", bindings),
-      (error) => error instanceof InvocationProjectionError
-        && error.code === "INVALID_INVOCATION_BINDING",
+      (error) => error instanceof InvocationProjectionError && error.code === "INVALID_INVOCATION_BINDING",
     );
   }
 });

@@ -132,7 +132,7 @@ This is canonical:
 
 ```ts
 const commands = defineCommands({
-  "document.render": { /* ... */ },
+  "document.render": {/* ... */},
 });
 
 type CommandId = keyof typeof commands;
@@ -141,11 +141,9 @@ type CommandId = keyof typeof commands;
 This is not:
 
 ```ts
-type CommandId =
-  | "document.render"
-  | "document.validate";
+type CommandId = "document.render" | "document.validate";
 
-const commands = { /* second authority */ };
+const commands = {/* second authority */};
 ```
 
 The same rule applies to future Path IDs, Skill IDs, capability IDs, and other registries.
@@ -494,13 +492,7 @@ const product = compileProduct({
   handlers,
 });
 
-const outcome = await runNodeCli(product, [
-  "document",
-  "render",
-  "input.md",
-  "--out",
-  "out.html",
-]);
+const outcome = await runNodeCli(product, ["document", "render", "input.md", "--out", "out.html"]);
 ```
 
 The exact implementation lives in source. This example communicates the ownership model: declare once, bind typed domain behavior, compile once, project everywhere.

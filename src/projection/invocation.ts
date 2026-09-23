@@ -38,28 +38,25 @@ export type InvocationProjection<Id extends string = string> =
       readonly requirements: readonly InvocationRequirement[];
     };
 
-type OptionToken<ValueArity extends OptionValueArity> =
-  | string
-  | (ValueArity extends "optional" ? true : never);
+type OptionToken<ValueArity extends OptionValueArity> = string | (ValueArity extends "optional" ? true : never);
 
-export type InvocationBinding<Field extends FieldDefinition> =
-  Field extends PositionalField ? string
-    : Field extends FlagField ? boolean
-      : Field extends RawArgsField ? readonly string[]
-        : Field extends OptionField<
-          infer _Schema,
-          infer Repeatable,
-          infer _Required,
-          infer ValueArity
-        >
-          ? Repeatable extends true
-            ? readonly OptionToken<ValueArity>[]
-            : OptionToken<ValueArity>
-          : never;
+export type InvocationBinding<Field extends FieldDefinition> = Field extends PositionalField
+  ? string
+  : Field extends FlagField
+    ? boolean
+    : Field extends RawArgsField
+      ? readonly string[]
+      : Field extends OptionField<infer _Schema, infer Repeatable, infer _Required, infer ValueArity>
+        ? Repeatable extends true
+          ? readonly OptionToken<ValueArity>[]
+          : OptionToken<ValueArity>
+        : never;
 
-export type InvocationBindings<Command extends CommandDefinition> = Readonly<Partial<{
-  [Key in keyof Command["input"]]: InvocationBinding<Command["input"][Key]>;
-}>>;
+export type InvocationBindings<Command extends CommandDefinition> = Readonly<
+  Partial<{
+    [Key in keyof Command["input"]]: InvocationBinding<Command["input"][Key]>;
+  }>
+>;
 
 export class InvocationProjectionError extends Error {
   readonly code = "INVALID_INVOCATION_BINDING" as const;
@@ -98,7 +95,11 @@ export function validateInvocationBindings(
     if (value === undefined) continue;
     if (field.kind === "positional") {
       if (typeof value !== "string") {
-        throw new InvocationProjectionError(command.id, `${command.id}.${key}: positional binding must be a string token`, key);
+        throw new InvocationProjectionError(
+          command.id,
+          `${command.id}.${key}: positional binding must be a string token`,
+          key,
+        );
       }
       continue;
     }
@@ -110,13 +111,21 @@ export function validateInvocationBindings(
     }
     if (field.kind === "raw-args") {
       if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-        throw new InvocationProjectionError(command.id, `${command.id}.${key}: raw argv binding must be a string array`, key);
+        throw new InvocationProjectionError(
+          command.id,
+          `${command.id}.${key}: raw argv binding must be a string array`,
+          key,
+        );
       }
       continue;
     }
     if (field.repeatable === true) {
       if (!Array.isArray(value) || value.some((item) => !validOptionToken(field, item))) {
-        throw new InvocationProjectionError(command.id, `${command.id}.${key}: repeatable option binding has an invalid token`, key);
+        throw new InvocationProjectionError(
+          command.id,
+          `${command.id}.${key}: repeatable option binding has an invalid token`,
+          key,
+        );
       }
       continue;
     }

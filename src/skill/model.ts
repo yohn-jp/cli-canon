@@ -27,9 +27,7 @@ export interface DelegateSkillStep<SkillId extends string = string> {
 }
 
 export type SkillStep<CommandId extends string = string, DelegatedSkillId extends string = string> =
-  | ProseSkillStep
-  | CommandSkillStep<CommandId>
-  | DelegateSkillStep<DelegatedSkillId>;
+  ProseSkillStep | CommandSkillStep<CommandId> | DelegateSkillStep<DelegatedSkillId>;
 
 export interface DomainResultReference {
   readonly kind: "domain-result";
@@ -58,10 +56,7 @@ export function defineSkills<const Catalog extends SkillCatalog>(catalog: Catalo
 }
 
 /** Author a command Skill step with bindings typed from the referenced Command Canon. */
-export function skillCommand<
-  const Commands extends CommandCatalog,
-  const Id extends CommandId<Commands>,
->(
+export function skillCommand<const Commands extends CommandCatalog, const Id extends CommandId<Commands>>(
   commands: Commands,
   commandId: Id,
   config: {
@@ -75,18 +70,18 @@ export function skillCommand<
     kind: "command" as const,
     commandId,
     guidance: config.guidance,
-    ...(config.prerequisites === undefined
-      ? {}
-      : { prerequisites: Object.freeze([...config.prerequisites]) }),
+    ...(config.prerequisites === undefined ? {} : { prerequisites: Object.freeze([...config.prerequisites]) }),
     ...(config.bindings === undefined
       ? {}
       : {
-          bindings: Object.freeze(Object.fromEntries(
-            Object.entries(config.bindings).map(([key, value]) => [
-              key,
-              Array.isArray(value) ? Object.freeze([...value]) : value,
-            ]),
-          )) as InvocationBindings<Commands[Id]>,
+          bindings: Object.freeze(
+            Object.fromEntries(
+              Object.entries(config.bindings).map(([key, value]) => [
+                key,
+                Array.isArray(value) ? Object.freeze([...value]) : value,
+              ]),
+            ),
+          ) as InvocationBindings<Commands[Id]>,
         }),
   });
 }

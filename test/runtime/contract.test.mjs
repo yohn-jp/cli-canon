@@ -128,13 +128,7 @@ test("one command canon drives routing, validation, result validation, and outpu
 });
 
 test("declared anywhere flags work before the nested route", async () => {
-  const result = await runNodeCli(fixture(), [
-    "--json",
-    "document",
-    "render",
-    "input.md",
-    "--out=out.html",
-  ]);
+  const result = await runNodeCli(fixture(), ["--json", "document", "render", "input.md", "--out=out.html"]);
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).json, true);
 });
@@ -189,24 +183,12 @@ test("unknown options, surplus positionals, and missing required option fail clo
 });
 
 test("option-looking tokens are consumed as required option values by the M0 grammar", async () => {
-  const result = await runNodeCli(fixture(), [
-    "document",
-    "render",
-    "input.md",
-    "--out",
-    "--json",
-  ]);
+  const result = await runNodeCli(fixture(), ["document", "render", "input.md", "--out", "--json"]);
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).writtenFile, "--json");
   assert.equal(JSON.parse(result.stdout).json, false);
 
-  const helpAsValue = await runNodeCli(fixture(), [
-    "document",
-    "render",
-    "input.md",
-    "--out",
-    "--help",
-  ]);
+  const helpAsValue = await runNodeCli(fixture(), ["document", "render", "input.md", "--out", "--help"]);
   assert.equal(helpAsValue.exitCode, 0);
   assert.equal(JSON.parse(helpAsValue.stdout).writtenFile, "--help");
 });
@@ -242,7 +224,8 @@ test("help and discovery order is deterministic across declaration insertion ord
       result: z.object({}),
     },
   };
-  const expectedHelp = "Usage: fixture <command>\n\nCommands:\n  alpha\tShow alpha.\n  zeta\tRun zeta.\n\nHelp: --help[=full|json]\n";
+  const expectedHelp =
+    "Usage: fixture <command>\n\nCommands:\n  alpha\tShow alpha.\n  zeta\tRun zeta.\n\nHelp: --help[=full|json]\n";
   const expectedDiscovery = {
     name: "fixture",
     commands: [
@@ -311,45 +294,50 @@ test("progressive text, full, and JSON help share command canon metadata", async
   assert.equal(json.exitCode, 0);
   assert.deepEqual(JSON.parse(json.stdout), {
     name: "fixture",
-    commands: [{
-      id: "document.inspect",
-      route: ["document", "inspect"],
-      summary: "Inspect an input file.",
-      description: "Read the file and report the selected detail level.",
-      examples: ["fixture document inspect input.txt --format=full"],
-      fields: [
-        {
-          key: "file",
-          kind: "positional",
-          required: true,
-          description: "Input file.",
-          metavar: "file",
-        },
-        {
-          key: "target",
-          kind: "positional",
-          required: false,
-          description: "Optional destination.",
-        },
-        {
-          key: "format",
-          kind: "option",
-          flag: "--format",
-          aliases: [],
-          placement: "after-route",
-          description: "Choose an optional detail level.",
-          repeatable: false,
-          required: false,
-          valueArity: "optional",
-          optionLookingValuePolicy: "consume",
-          metavar: "style",
-        },
-      ],
-    }],
+    commands: [
+      {
+        id: "document.inspect",
+        route: ["document", "inspect"],
+        summary: "Inspect an input file.",
+        description: "Read the file and report the selected detail level.",
+        examples: ["fixture document inspect input.txt --format=full"],
+        fields: [
+          {
+            key: "file",
+            kind: "positional",
+            required: true,
+            description: "Input file.",
+            metavar: "file",
+          },
+          {
+            key: "target",
+            kind: "positional",
+            required: false,
+            description: "Optional destination.",
+          },
+          {
+            key: "format",
+            kind: "option",
+            flag: "--format",
+            aliases: [],
+            placement: "after-route",
+            description: "Choose an optional detail level.",
+            repeatable: false,
+            required: false,
+            valueArity: "optional",
+            optionLookingValuePolicy: "consume",
+            metavar: "style",
+          },
+        ],
+      },
+    ],
   });
 
   const domainJson = await runNodeCli(product, ["domain", "--help=json"]);
-  assert.deepEqual(JSON.parse(domainJson.stdout).commands.map((command) => command.id), ["domain.list", "domain.show"]);
+  assert.deepEqual(
+    JSON.parse(domainJson.stdout).commands.map((command) => command.id),
+    ["domain.list", "domain.show"],
+  );
 });
 
 test("architecture example progressive help uses only the Command Canon", async () => {
@@ -393,25 +381,29 @@ test("architecture example progressive help uses only the Command Canon", async 
   const jsonHelp = await runNodeCli(product, ["architecture", "example", "--help=json"]);
   assert.deepEqual(JSON.parse(jsonHelp.stdout), {
     name: "fixture",
-    commands: [{
-      id: "architecture.example",
-      route: ["architecture", "example"],
-      summary: "Show an architecture example.",
-      description: "Read one example from the canonical architecture.",
-      examples: ["fixture architecture example --format=full"],
-      fields: [{
-        key: "format",
-        kind: "option",
-        flag: "--format",
-        aliases: [],
-        placement: "after-route",
-        description: "Choose the example detail level.",
-        repeatable: false,
-        required: false,
-        valueArity: "optional",
-        optionLookingValuePolicy: "consume",
-      }],
-    }],
+    commands: [
+      {
+        id: "architecture.example",
+        route: ["architecture", "example"],
+        summary: "Show an architecture example.",
+        description: "Read one example from the canonical architecture.",
+        examples: ["fixture architecture example --format=full"],
+        fields: [
+          {
+            key: "format",
+            kind: "option",
+            flag: "--format",
+            aliases: [],
+            placement: "after-route",
+            description: "Choose the example detail level.",
+            repeatable: false,
+            required: false,
+            valueArity: "optional",
+            optionLookingValuePolicy: "consume",
+          },
+        ],
+      },
+    ],
   });
 });
 
@@ -445,8 +437,7 @@ test("compileProduct rejects duplicate routes and conflicting anywhere flags", (
         handlers: { one: () => ({}), two: () => ({}) },
       }),
     (error) =>
-      error instanceof CanonConstructionError &&
-      error.issues.some((issue) => issue.code === "DUPLICATE_ROUTE"),
+      error instanceof CanonConstructionError && error.issues.some((issue) => issue.code === "DUPLICATE_ROUTE"),
   );
 
   const flags = defineCommands({
@@ -470,9 +461,7 @@ test("compileProduct rejects duplicate routes and conflicting anywhere flags", (
         commands: flags,
         handlers: { one: () => ({}), two: () => ({}) },
       }),
-    (error) =>
-      error instanceof CanonConstructionError &&
-      error.issues.some((issue) => issue.code === "FLAG_COLLISION"),
+    (error) => error instanceof CanonConstructionError && error.issues.some((issue) => issue.code === "FLAG_COLLISION"),
   );
 });
 
@@ -483,7 +472,8 @@ test("compileProduct rejects missing and unknown handler bindings at constructio
   for (const handlers of [{}, { run: () => ({}), unknown: () => ({}) }]) {
     assert.throws(
       () => compileProduct({ name: "fixture", commands, handlers }),
-      (error) => error instanceof CanonConstructionError &&
+      (error) =>
+        error instanceof CanonConstructionError &&
         error.issues.some((issue) => issue.code === "INVALID_HANDLER_BINDING"),
     );
   }
@@ -499,7 +489,12 @@ test("compiled command definitions and handler bindings snapshot their authoring
     },
   });
   let calls = 0;
-  const handlers = bindHandlers(commands)({ echo: ({ value }) => { calls += 1; return { value }; } });
+  const handlers = bindHandlers(commands)({
+    echo: ({ value }) => {
+      calls += 1;
+      return { value };
+    },
+  });
   const product = compileProduct({ name: "fixture", commands, handlers });
   assert.equal(calls, 0);
 
@@ -530,9 +525,9 @@ test("unsupported ordered groups and option-looking-value rejection fail during 
   });
   assert.throws(
     () => compileProduct({ name: "fixture", commands: ordered, handlers: { apply: () => ({}) } }),
-    (error) => error instanceof CanonConstructionError &&
-      error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" &&
-        issue.fields?.join(",") === "resource,mode"),
+    (error) =>
+      error instanceof CanonConstructionError &&
+      error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" && issue.fields?.join(",") === "resource,mode"),
   );
 
   const optionLooking = defineCommands({
@@ -547,7 +542,8 @@ test("unsupported ordered groups and option-looking-value rejection fail during 
   });
   assert.throws(
     () => compileProduct({ name: "fixture", commands: optionLooking, handlers: { run: () => ({}) } }),
-    (error) => error instanceof CanonConstructionError &&
+    (error) =>
+      error instanceof CanonConstructionError &&
       error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" && issue.field === "value"),
   );
 });
