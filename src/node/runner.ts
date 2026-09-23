@@ -1,11 +1,6 @@
 import { Command, CommanderError, Option } from "commander";
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
-import type {
-  CommandCatalog,
-  CommandId,
-  CommandResultOutput,
-  FieldDefinition,
-} from "../command/model.js";
+import type { CommandCatalog, CommandId, CommandResultOutput, FieldDefinition } from "../command/model.js";
 import { composeCommandProjection, type LegacyRouteDescriptor } from "../projection/discovery.js";
 import { parseHelpMode, projectHelp, type HelpOutputMode } from "../projection/help.js";
 import type { DomainErrorAdapter } from "../output/model.js";
@@ -60,9 +55,7 @@ export type NodeCliFailure =
     };
 
 export type NodeCliExecution<Catalog extends CommandCatalog = CommandCatalog> =
-  | NodeCliSuccess<Catalog>
-  | NodeCliHelp
-  | NodeCliFailure;
+  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliFailure;
 
 export interface ExecuteNodeCliOptions {
   readonly helpFormat?: HelpOutputMode | "text";
@@ -75,19 +68,14 @@ export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = Command
   readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
 }
 
-export interface ProjectNodeCliExecutionOptions<
-  DomainError = never,
-  Catalog extends CommandCatalog = CommandCatalog,
-> {
+export interface ProjectNodeCliExecutionOptions<DomainError = never, Catalog extends CommandCatalog = CommandCatalog> {
   readonly maxOutputBytes?: number;
   readonly domainErrorAdapter?: DomainErrorAdapter<DomainError>;
   readonly terminalAdapter?: NodeCliTerminalAdapter<Catalog>;
 }
 
-export interface RunNodeCliOptions<
-  DomainError = never,
-  Catalog extends CommandCatalog = CommandCatalog,
-> extends ExecuteNodeCliOptions, ProjectNodeCliExecutionOptions<DomainError, Catalog> {}
+export interface RunNodeCliOptions<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>
+  extends ExecuteNodeCliOptions, ProjectNodeCliExecutionOptions<DomainError, Catalog> {}
 
 function outputPolicyOptions(maxOutputBytes: number | undefined): { readonly maxBytes?: number } {
   return maxOutputBytes === undefined ? {} : { maxBytes: maxOutputBytes };
@@ -101,9 +89,7 @@ function failureResult(
   stream: "stdout" | "stderr" = "stderr",
 ): CliOutcome {
   const bounded = textOutput(output, outputPolicyOptions(maxOutputBytes));
-  return bounded.status === "success"
-    ? cliFailure(failureKind, bounded.output, exitCode, stream)
-    : bounded;
+  return bounded.status === "success" ? cliFailure(failureKind, bounded.output, exitCode, stream) : bounded;
 }
 
 function boundedOutcome(outcome: CliOutcome, maxOutputBytes: number | undefined): CliOutcome {
@@ -199,8 +185,7 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
     if (field.kind === "positional") {
       const name = field.metavar ?? field.key;
       command.argument(field.required === false ? `[${name}]` : `<${name}>`);
-    }
-    else if (field.kind === "raw-args") command.argument("[args...]");
+    } else if (field.kind === "raw-args") command.argument("[args...]");
     else command.addOption(makeOption(field, field.placement !== "anywhere"));
   }
   command.allowExcessArguments(false);
@@ -243,19 +228,20 @@ function addAnywhereOptions<const Catalog extends CommandCatalog>(
 }
 
 function classifyCommanderError(error: CommanderError, commandId?: string): StructuredUsageFailure {
-  const code = error.code === "commander.excessArguments"
-    ? "extra-positional-argument"
-    : error.code === "commander.unknownOption"
-      ? "unknown-option"
-      : error.code === "commander.optionMissingArgument"
-        ? "missing-option-value"
-        : error.code === "commander.missingMandatoryOptionValue"
-          ? "missing-required-option"
-          : error.code === "commander.missingArgument"
-            ? "missing-positional-argument"
-            : error.code === "commander.unknownCommand"
-              ? "unknown-command"
-              : "invalid-arguments";
+  const code =
+    error.code === "commander.excessArguments"
+      ? "extra-positional-argument"
+      : error.code === "commander.unknownOption"
+        ? "unknown-option"
+        : error.code === "commander.optionMissingArgument"
+          ? "missing-option-value"
+          : error.code === "commander.missingMandatoryOptionValue"
+            ? "missing-required-option"
+            : error.code === "commander.missingArgument"
+              ? "missing-positional-argument"
+              : error.code === "commander.unknownCommand"
+                ? "unknown-command"
+                : "invalid-arguments";
   return {
     code,
     parserCode: error.code,
@@ -263,33 +249,29 @@ function classifyCommanderError(error: CommanderError, commandId?: string): Stru
   };
 }
 
-function usageFailure(
-  failure: StructuredUsageFailure,
-  maxOutputBytes: number | undefined,
-): CliOutcome {
-  const message = failure.code === "extra-positional-argument"
-    ? "error: too many arguments\n"
-    : failure.code === "unknown-option"
-      ? "error: unknown option\n"
-      : failure.code === "missing-option-value"
-        ? "error: option value missing\n"
-        : failure.code === "missing-required-option"
-          ? `error: required option '${failure.option ?? "unknown"}' not specified\n`
-          : failure.code === "missing-positional-argument"
-            ? "error: required argument missing\n"
-            : failure.code === "unknown-command"
-              ? "error: unknown command\n"
-              : failure.code === "invalid-help-mode"
-                ? `Unknown help mode: ${failure.value ?? ""}\n`
-                : failure.code === "no-command"
-                  ? "No command selected.\n"
-                  : "error: invalid command arguments\n";
+function usageFailure(failure: StructuredUsageFailure, maxOutputBytes: number | undefined): CliOutcome {
+  const message =
+    failure.code === "extra-positional-argument"
+      ? "error: too many arguments\n"
+      : failure.code === "unknown-option"
+        ? "error: unknown option\n"
+        : failure.code === "missing-option-value"
+          ? "error: option value missing\n"
+          : failure.code === "missing-required-option"
+            ? `error: required option '${failure.option ?? "unknown"}' not specified\n`
+            : failure.code === "missing-positional-argument"
+              ? "error: required argument missing\n"
+              : failure.code === "unknown-command"
+                ? "error: unknown command\n"
+                : failure.code === "invalid-help-mode"
+                  ? `Unknown help mode: ${failure.value ?? ""}\n`
+                  : failure.code === "no-command"
+                    ? "No command selected.\n"
+                    : "error: invalid command arguments\n";
   return failureResult("usage", message, 2, maxOutputBytes);
 }
 
-export async function executeNodeCli<
-  const Catalog extends CommandCatalog,
->(
+export async function executeNodeCli<const Catalog extends CommandCatalog>(
   product: CompiledProduct<Catalog>,
   argv: readonly string[],
   options: ExecuteNodeCliOptions = {},
@@ -358,9 +340,7 @@ export async function executeNodeCli<
           const missingRequiredOption = compiled.fields.find((field) => {
             if (field.kind !== "option" || field.required !== true) return false;
             const value = raw[field.key];
-            return field.repeatable === true
-              ? !Array.isArray(value) || value.length === 0
-              : value === undefined;
+            return field.repeatable === true ? !Array.isArray(value) || value.length === 0 : value === undefined;
           });
           if (missingRequiredOption !== undefined) {
             return {
@@ -429,46 +409,40 @@ export async function executeNodeCli<
     : await invocation;
 }
 
-export function projectNodeCliExecution<
-  DomainError = never,
-  Catalog extends CommandCatalog = CommandCatalog,
->(
+export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(
   execution: NodeCliExecution<Catalog>,
   options: ProjectNodeCliExecutionOptions<DomainError, Catalog> = {},
 ): CliResult {
   const maxOutputBytes = options.maxOutputBytes;
   if (execution.status === "success") {
-    const outcome = options.terminalAdapter?.success?.(execution)
-      ?? jsonOutput(execution.result, outputPolicyOptions(maxOutputBytes));
+    const outcome =
+      options.terminalAdapter?.success?.(execution) ??
+      jsonOutput(execution.result, outputPolicyOptions(maxOutputBytes));
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
   if (execution.status === "help") {
-    const outcome = typeof execution.projection === "string"
-      ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
-      : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes));
+    const outcome =
+      typeof execution.projection === "string"
+        ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
+        : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes));
     return toCliResult(outcome);
   }
 
   if (execution.failureKind === "usage") {
-    const outcome = options.terminalAdapter?.usageFailure?.(execution.usageFailure)
-      ?? usageFailure(execution.usageFailure, maxOutputBytes);
+    const outcome =
+      options.terminalAdapter?.usageFailure?.(execution.usageFailure) ??
+      usageFailure(execution.usageFailure, maxOutputBytes);
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
   if (execution.failureKind === "validation") {
-    return toCliResult(failureResult(
-      "validation",
-      `INVALID_INPUT: ${errorMessage(execution.error)}\n`,
-      2,
-      maxOutputBytes,
-    ));
+    return toCliResult(
+      failureResult("validation", `INVALID_INPUT: ${errorMessage(execution.error)}\n`, 2, maxOutputBytes),
+    );
   }
   if (execution.failureKind === "handler-result") {
-    return toCliResult(failureResult(
-      "handler-result",
-      `INVALID_HANDLER_RESULT: ${errorMessage(execution.error)}\n`,
-      1,
-      maxOutputBytes,
-    ));
+    return toCliResult(
+      failureResult("handler-result", `INVALID_HANDLER_RESULT: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
+    );
   }
 
   const adapter = options.domainErrorAdapter;
@@ -476,18 +450,10 @@ export function projectNodeCliExecution<
     const mapped = adapter.map(execution.error);
     return toCliResult(failureResult("domain", mapped.output, mapped.exitCode, maxOutputBytes, mapped.stream));
   }
-  return toCliResult(failureResult(
-    "unexpected",
-    `UNEXPECTED: ${errorMessage(execution.error)}\n`,
-    1,
-    maxOutputBytes,
-  ));
+  return toCliResult(failureResult("unexpected", `UNEXPECTED: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes));
 }
 
-export async function runNodeCli<
-  const Catalog extends CommandCatalog,
-  DomainError = never,
->(
+export async function runNodeCli<const Catalog extends CommandCatalog, DomainError = never>(
   product: CompiledProduct<Catalog>,
   argv: readonly string[],
   options: RunNodeCliOptions<DomainError, Catalog> = {},

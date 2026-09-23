@@ -61,9 +61,7 @@ function projectPackageMetadata(packageMetadata: ProductPackageIdentity): Produc
     ...(packageMetadata.bin === undefined
       ? {}
       : {
-          bin: typeof packageMetadata.bin === "string"
-            ? packageMetadata.bin
-            : { ...packageMetadata.bin },
+          bin: typeof packageMetadata.bin === "string" ? packageMetadata.bin : { ...packageMetadata.bin },
         }),
   };
 }
@@ -74,7 +72,15 @@ function compareCommands(
 ): number {
   const leftRoute = left.route.join(" ");
   const rightRoute = right.route.join(" ");
-  return leftRoute < rightRoute ? -1 : leftRoute > rightRoute ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  return leftRoute < rightRoute
+    ? -1
+    : leftRoute > rightRoute
+      ? 1
+      : left.id < right.id
+        ? -1
+        : left.id > right.id
+          ? 1
+          : 0;
 }
 
 export function projectDiscovery(
@@ -82,10 +88,12 @@ export function projectDiscovery(
   request: DiscoveryRequest = {},
 ): ProductDiscovery {
   const commands = product.commands
-    .filter((command) => request.route === undefined || (
-      request.route.length <= command.route.length &&
-      request.route.every((segment, index) => command.route[index] === segment)
-    ))
+    .filter(
+      (command) =>
+        request.route === undefined ||
+        (request.route.length <= command.route.length &&
+          request.route.every((segment, index) => command.route[index] === segment)),
+    )
     .sort(compareCommands);
   return {
     name: product.name,
@@ -179,14 +187,22 @@ export function composeCommandProjection(
     ...(product.packageMetadata === undefined
       ? {}
       : { packageMetadata: Object.freeze(projectPackageMetadata(product.packageMetadata)) }),
-    commands: Object.freeze(commands.map((command) => Object.freeze({
-      ...command,
-      route: Object.freeze([...command.route]),
-      ...(command.examples === undefined ? {} : { examples: Object.freeze([...command.examples]) }),
-      fields: Object.freeze(command.fields.map((field) => Object.freeze({
-        ...field,
-        ...(field.aliases === undefined ? {} : { aliases: Object.freeze([...field.aliases]) }),
-      }))),
-    }))),
+    commands: Object.freeze(
+      commands.map((command) =>
+        Object.freeze({
+          ...command,
+          route: Object.freeze([...command.route]),
+          ...(command.examples === undefined ? {} : { examples: Object.freeze([...command.examples]) }),
+          fields: Object.freeze(
+            command.fields.map((field) =>
+              Object.freeze({
+                ...field,
+                ...(field.aliases === undefined ? {} : { aliases: Object.freeze([...field.aliases]) }),
+              }),
+            ),
+          ),
+        }),
+      ),
+    ),
   });
 }
