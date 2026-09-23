@@ -8,6 +8,11 @@ export type HelpRequest =
   | { readonly kind: "route"; readonly route: readonly string[]; readonly mode?: HelpMode }
   | { readonly kind: "command"; readonly commandId: string; readonly mode?: HelpMode };
 
+export interface HelpProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
+  readonly name: string;
+  readonly commands: HelpProjectionProduct<Catalog>["commands"];
+}
+
 function fieldSyntax(field: CompiledField): string {
   if (field.kind === "flag") return `[${[...(field.aliases ?? []), field.flag].join(", ")}]`;
   if (field.kind === "option") {
@@ -33,7 +38,7 @@ function helpFooter(): string {
 }
 
 function sortedCommands<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: HelpProjectionProduct<Catalog>,
 ): readonly CompiledCommand[] {
   return [...product.commands].sort((left, right) => {
     const leftRoute = left.route.join(" ");
@@ -78,7 +83,7 @@ function renderCommandHelp(command: CompiledCommand, productName: string, mode: 
 }
 
 function routeChildren<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: HelpProjectionProduct<Catalog>,
   route: readonly string[],
 ): readonly { readonly segment: string; readonly command: CompiledCommand }[] {
   const children = new Map<string, CompiledCommand>();
@@ -91,7 +96,7 @@ function routeChildren<const Catalog extends CommandCatalog>(
 }
 
 function renderRouteHelp<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: HelpProjectionProduct<Catalog>,
   route: readonly string[],
   mode: HelpMode,
 ): string {
@@ -110,7 +115,7 @@ function renderRouteHelp<const Catalog extends CommandCatalog>(
 }
 
 function renderRootHelp<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: HelpProjectionProduct<Catalog>,
   mode: HelpMode,
 ): string {
   const lines = [`Usage: ${product.name} <command>`, "", "Commands:"];
@@ -123,7 +128,7 @@ function renderRootHelp<const Catalog extends CommandCatalog>(
 }
 
 export function renderHelp<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: HelpProjectionProduct<Catalog>,
   request: HelpRequest = { kind: "root" },
 ): string {
   const mode = request.mode ?? "text";
