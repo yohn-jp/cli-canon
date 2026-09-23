@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { bindHandlers, compileProduct, defineCommands } from "../../dist/index.js";
 import {
@@ -96,5 +98,122 @@ test("resolution requires explicit absolute context for each used root", () => {
     () => resolvePaths(envPath, { platform: "posix", env: {} }),
     (error) => error instanceof PathResolutionError &&
       error.issues[0]?.code === "MISSING_PATH_CONTEXT",
+  );
+});
+
+test("path parameters are required single components and kind is projected", () => {
+  const paths = compilePaths(definePaths({
+    project: { root: "home", segments: ["projects", { param: "projectId" }] },
+    report: { parent: "project", segments: ["report.json"], kind: "file" },
+  }));
+
+  assert.equal(paths.paths.find((entry) => entry.id === "project")?.kind, "directory");
+  assert.equal(paths.paths.find((entry) => entry.id === "report")?.kind, "file");
+  assert.equal(resolvePaths(paths, {
+    platform: "posix",
+    home: "/home/user",
+    parameters: { projectId: "invoice-17" },
+  }).report, "/home/user/projects/invoice-17/report.json");
+
+  assert.throws(
+    () => resolvePaths(paths, { platform: "posix", home: "/home/user" }),
+    (error) => error instanceof PathResolutionError &&
+      error.issues[0]?.code === "MISSING_PATH_PARAMETER" &&
+      error.issues[0]?.pathId === "project",
+  );
+  for (const parameter of ["", ".", "..", "invoice/17", "invoice\\17"]) {
+    assert.throws(
+      () => resolvePaths(paths, {
+        platform: "posix",
+        home: "/home/user",
+        parameters: { projectId: parameter },
+      }),
+      (error) => error instanceof PathResolutionError && error.issues[0]?.code === "INVALID_PATH_PARAMETER",
+    );
+  }
+  assert.throws(
+    () => resolvePaths(paths, {
+      platform: "posix",
+      home: "/home/user",
+      parameters: { projectId: "invoice-17", extra: "unexpected" },
+    }),
+    (error) => error instanceof PathResolutionError && error.issues[0]?.code === "UNKNOWN_PATH_PARAMETER",
+  );
+});
+
+test("ordered root strategies honor env, platform, and default precedence", () => {
+  const paths = compilePaths(definePaths({
+    data: {
+      root: {
+        candidates: [
+          { env: "APP_DATA_HOME", absoluteOnly: true, segments: ["override"] },
+          { platform: "win32", root: { env: "LOCALAPPDATA" }, segments: ["cli-canon"] },
+          { default: "home", segments: [".local", "share", "cli-canon"] },
+        ],
+      },
+      segments: ["state"],
+    },
+  }));
+
+  assert.equal(resolvePaths(paths, {
+    platform: "posix",
+    home: "/home/user",
+    env: { APP_DATA_HOME: "/srv/app-data" },
+  }).data, "/srv/app-data/override/state");
+
+  assert.equal(resolvePaths(paths, {
+    platform: "posix",
+    home: "/home/user",
+    env: { APP_DATA_HOME: "relative/app-data" },
+  }).data, "/home/user/.local/share/cli-canon/state");
+
+  assert.equal(resolvePaths(paths, {
+    platform: "win32",
+    home: "C:\\Users\\user",
+    env: { LOCALAPPDATA: "D:\\Users\\user\\AppData\\Local" },
+  }).data, "D:\\Users\\user\\AppData\\Local\\cli-canon\\state");
+
+  assert.throws(
+    () => compilePaths({
+      invalid: { root: { candidates: [{ default: "home" }, { env: "LATE_OVERRIDE" }] } },
+    }),
+    (error) => error instanceof PathConstructionError &&
+      error.issues.some((entry) => entry.code === "INVALID_PATH_ROOT"),
+  );
+});
+
+test("lexical resolution does not create filesystem paths or read implicit roots", () => {
+  const absentRoot = `/tmp/cli-canon-path-${randomUUID()}`;
+  const paths = compilePaths(definePaths({
+    absent: { root: { path: absentRoot }, kind: "directory" },
+  }));
+
+  assert.equal(existsSync(absentRoot), false);
+  assert.equal(resolvePaths(paths, { platform: "posix" }).absent, absentRoot);
+  assert.equal(existsSync(absentRoot), false);
+});
+
+test("invalid path context values fail with structured errors", () => {
+  const paths = compilePaths(definePaths({
+    project: { root: "home", segments: [{ param: "projectId" }] },
+  }));
+  assert.throws(
+    () => resolvePaths(paths, {
+      platform: "posix",
+      home: "/home/user",
+      parameters: { projectId: 17 },
+    }),
+    (error) => error instanceof PathResolutionError &&
+      error.issues[0]?.code === "INVALID_PATH_PARAMETER",
+  );
+  assert.throws(
+    () => resolvePaths(paths, {
+      platform: "posix",
+      home: "/home/user",
+      parameters: { projectId: "demo" },
+      env: null,
+    }),
+    (error) => error instanceof PathResolutionError &&
+      error.issues[0]?.code === "INVALID_PATH_CONTEXT",
   );
 });
