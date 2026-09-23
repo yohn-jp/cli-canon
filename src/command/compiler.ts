@@ -6,6 +6,8 @@ import type {
   CommandDefinition,
   CommandId,
   InputDefinition,
+  OptionLookingValuePolicy,
+  OptionValueArity,
 } from "./model.js";
 import { compileSkills, type CompiledSkills } from "../skill/compiler.js";
 import type { SkillCatalog } from "../skill/model.js";
@@ -19,8 +21,11 @@ export interface CompiledField {
   readonly aliases?: readonly string[];
   readonly repeatable?: boolean;
   readonly required?: boolean;
+  readonly valueArity?: OptionValueArity;
+  readonly optionLookingValuePolicy?: OptionLookingValuePolicy;
   readonly placement?: "after-route" | "anywhere";
   readonly metavar?: string;
+  readonly description?: string;
 }
 
 export interface CompiledCommand<
@@ -31,6 +36,8 @@ export interface CompiledCommand<
   readonly id: Id;
   readonly route: readonly [string, ...string[]];
   readonly summary: string;
+  readonly description?: string;
+  readonly examples?: readonly string[];
   readonly fields: readonly CompiledField[];
   readonly definition: CommandDefinition<Input, Result>;
 }
@@ -73,7 +80,7 @@ function fieldFlags(field: InputDefinition[string]): readonly string[] {
 function signature(field: InputDefinition[string]): string {
   if (field.kind === "flag") return `flag:${field.flag}:${field.aliases.join(",")}`;
   if (field.kind === "option") {
-    return `option:${field.flag}:${field.aliases.join(",")}:${field.repeatable}:${field.required}`;
+    return `option:${field.flag}:${field.aliases.join(",")}:${field.repeatable}:${field.required}:${field.valueArity}:${field.optionLookingValuePolicy}`;
   }
   return field.kind;
 }
@@ -108,10 +115,55 @@ export function compileProduct<
 
     const localFlags = new Map<string, string>();
     let rawArgsCount = 0;
+    let rawArgsSeen = false;
+    let optionalPositionalSeen = false;
     const fields: CompiledField[] = [];
 
+    for (const group of definition.orderedOptionGroups ?? []) {
+      const validGroup = group.length > 1 && group.every((fieldKey) => {
+        const field = definition.input[fieldKey];
+        return field?.kind === "option" && field.repeatable;
+      });
+      if (!validGroup) {
+        issues.push({
+          code: "INVALID_INPUT_GRAMMAR",
+          commandId,
+          fields: Object.freeze([...group]),
+          message: `${commandId}: ordered option groups must name at least two repeatable option fields`,
+        });
+      } else {
+        issues.push({
+          code: "UNSUPPORTED_GRAMMAR",
+          commandId,
+          fields: Object.freeze([...group]),
+          message: `${commandId}: Commander cannot preserve ordered occurrences for option fields ${group.join(", ")}`,
+        });
+      }
+    }
+
     for (const [fieldKey, field] of Object.entries(definition.input)) {
-      if (field.kind === "raw-args") rawArgsCount += 1;
+      if (field.kind === "raw-args") {
+        rawArgsCount += 1;
+        rawArgsSeen = true;
+      } else if (field.kind === "positional") {
+        if (rawArgsSeen) {
+          issues.push({
+            code: "INVALID_INPUT_GRAMMAR",
+            commandId,
+            field: fieldKey,
+            message: `${commandId}.${fieldKey}: positional fields must precede rawArgs`,
+          });
+        }
+        if (!field.required) optionalPositionalSeen = true;
+        else if (optionalPositionalSeen) {
+          issues.push({
+            code: "INVALID_INPUT_GRAMMAR",
+            commandId,
+            field: fieldKey,
+            message: `${commandId}.${fieldKey}: a required positional cannot follow an optional positional`,
+          });
+        }
+      }
       for (const candidate of fieldFlags(field)) {
         if (!(LONG_FLAG.test(candidate) || SHORT_FLAG.test(candidate))) {
           issues.push({ code: "INVALID_FLAG", commandId, field: fieldKey, message: `${commandId}.${fieldKey}: invalid flag ${candidate}` });
@@ -122,6 +174,22 @@ export function compileProduct<
           issues.push({ code: "FLAG_COLLISION", commandId, field: fieldKey, message: `${commandId}: ${candidate} is used by both ${existingField} and ${fieldKey}` });
         } else {
           localFlags.set(candidate, fieldKey);
+        }
+        if (candidate === "--help" || candidate === "-h") {
+          issues.push({
+            code: "FLAG_COLLISION",
+            commandId,
+            field: fieldKey,
+            message: `${commandId}.${fieldKey}: ${candidate} is reserved for Canon help`,
+          });
+        }
+        if (field.kind === "option" && field.optionLookingValuePolicy === "reject") {
+          issues.push({
+            code: "UNSUPPORTED_GRAMMAR",
+            commandId,
+            field: fieldKey,
+            message: `${commandId}.${fieldKey}: Commander consumes option-looking tokens as required option values`,
+          });
         }
         if ((field.kind === "option" || field.kind === "flag") && field.placement === "anywhere") {
           const current = { commandId, fieldKey, signature: signature(field) };
@@ -141,10 +209,25 @@ export function compileProduct<
       fields.push(Object.freeze({
         key: fieldKey,
         kind: field.kind,
-        ...(field.kind === "option" || field.kind === "flag"
-          ? { flag: field.flag, aliases: Object.freeze([...field.aliases]), placement: field.placement }
+        ...(field.kind === "positional"
+          ? { required: field.required, ...(field.description === undefined ? {} : { description: field.description }) }
           : {}),
-        ...(field.kind === "option" ? { repeatable: field.repeatable, required: field.required } : {}),
+        ...(field.kind === "option" || field.kind === "flag"
+          ? {
+            flag: field.flag,
+            aliases: Object.freeze([...field.aliases]),
+            placement: field.placement,
+            ...(field.description === undefined ? {} : { description: field.description }),
+          }
+          : {}),
+        ...(field.kind === "option"
+          ? {
+            repeatable: field.repeatable,
+            required: field.required,
+            valueArity: field.valueArity,
+            optionLookingValuePolicy: field.optionLookingValuePolicy,
+          }
+          : {}),
         ...(field.kind === "positional" || field.kind === "option"
           ? (field.metavar === undefined ? {} : { metavar: field.metavar })
           : {}),
@@ -159,6 +242,8 @@ export function compileProduct<
       id: commandId,
       route: Object.freeze([...definition.route]) as readonly [string, ...string[]],
       summary: definition.summary,
+      ...(definition.description === undefined ? {} : { description: definition.description }),
+      ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
       fields: Object.freeze(fields),
       definition,
     }));

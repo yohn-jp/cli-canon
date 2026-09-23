@@ -2,6 +2,7 @@ import { Command, CommanderError, Option } from "commander";
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
 import type { CommandCatalog, FieldDefinition } from "../command/model.js";
 import { projectDiscovery } from "../projection/discovery.js";
+import { renderHelp, type HelpRequest } from "../projection/help.js";
 
 export type CliFailureKind = "usage" | "validation" | "handler-result" | "unexpected";
 
@@ -13,7 +14,7 @@ export interface CliResult {
 }
 
 export interface RunNodeCliOptions {
-  readonly helpFormat?: "text" | "json";
+  readonly helpFormat?: "text" | "full" | "json";
 }
 
 function camelcase(value: string): string {
@@ -29,7 +30,8 @@ function flagsFor(field: CompiledField): string {
   const all = [...(field.aliases ?? []), field.flag].filter((value): value is string => value !== undefined);
   const prefix = all.join(", ");
   if (field.kind === "flag") return prefix;
-  return `${prefix} <${field.metavar ?? field.key}>`;
+  const metavar = field.metavar ?? field.key;
+  return field.valueArity === "optional" ? `${prefix} [${metavar}]` : `${prefix} <${metavar}>`;
 }
 
 function makeOption(field: CompiledField): Option {
@@ -66,8 +68,19 @@ async function decodeInput(
     if (definition.kind === "option" && definition.repeatable) {
       const values = Array.isArray(value) ? value : [];
       const parsed: unknown[] = [];
-      for (const item of values) parsed.push(await definition.schema.parseAsync(item));
+      for (const item of values) {
+        if (item === true && definition.valueArity === "optional") parsed.push(undefined);
+        else parsed.push(await definition.schema.parseAsync(item));
+      }
       decoded[field.key] = parsed;
+      continue;
+    }
+    if (definition.kind === "positional" && value === undefined && !definition.required) {
+      decoded[field.key] = undefined;
+      continue;
+    }
+    if (definition.kind === "option" && value === true && definition.valueArity === "optional") {
+      decoded[field.key] = undefined;
       continue;
     }
     if (value === undefined && definition.kind === "option" && !definition.required) {
@@ -81,7 +94,10 @@ async function decodeInput(
 
 function addInputSyntax(command: Command, compiled: CompiledCommand): void {
   for (const field of compiled.fields) {
-    if (field.kind === "positional") command.argument(`<${field.metavar ?? field.key}>`);
+    if (field.kind === "positional") {
+      const name = field.metavar ?? field.key;
+      command.argument(field.required === false ? `[${name}]` : `<${name}>`);
+    }
     else if (field.kind === "raw-args") command.argument("[args...]");
     else command.addOption(makeOption(field));
   }
@@ -97,6 +113,8 @@ function childNode(parent: RouteNode, segment: string): RouteNode {
   const existing = parent.children.get(segment);
   if (existing !== undefined) return existing;
   const command = parent.command.command(segment);
+  command.helpOption(false);
+  command.addHelpCommand(false);
   const node = { command, children: new Map<string, RouteNode>() };
   parent.children.set(segment, node);
   return node;
@@ -128,19 +146,156 @@ function stringifyResult(value: unknown): string {
   return json === undefined ? "" : `${json}\n`;
 }
 
+type CanonHelpMode = "text" | "full" | "json";
+
+interface DetectedHelp {
+  readonly mode: CanonHelpMode;
+  readonly routeWords: readonly string[];
+  readonly invalidMode?: string;
+}
+
+function declaredOptions<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+): ReadonlyMap<string, CompiledField> {
+  const options = new Map<string, CompiledField>();
+  for (const command of product.commands) {
+    for (const field of command.fields) {
+      if ((field.kind === "option" || field.kind === "flag") && field.flag !== undefined) {
+        options.set(field.flag, field);
+        for (const alias of field.aliases ?? []) options.set(alias, field);
+      }
+    }
+  }
+  return options;
+}
+
+function detectHelp<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+  argv: readonly string[],
+): DetectedHelp | undefined {
+  const delimiter = argv.indexOf("--");
+  const end = delimiter === -1 ? argv.length : delimiter;
+  const options = declaredOptions(product);
+  const routeWords: string[] = [];
+  let detected: DetectedHelp | undefined;
+
+  for (let index = 0; index < end; index += 1) {
+    const token = argv[index];
+    if (token === undefined) continue;
+    if (token === "--help" || token === "-h" || token.startsWith("--help=")) {
+      const value = token.startsWith("--help=") ? token.slice("--help=".length) : undefined;
+      const validValue = value === undefined || value === "full" || value === "json";
+      detected ??= {
+        mode: value === "full" || value === "json" ? value : "text",
+        routeWords,
+        ...(validValue ? {} : { invalidMode: value }),
+      };
+      continue;
+    }
+    if (token === "--") break;
+
+    const flag = token.startsWith("-") ? token.split("=", 1)[0] : undefined;
+    const declaration = flag === undefined ? undefined : options.get(flag);
+    const hasInlineValue = token.includes("=");
+    if (declaration?.kind === "option" && !hasInlineValue) {
+      const next = argv[index + 1];
+      if (declaration.valueArity !== "optional" || (
+        next !== undefined && (!next.startsWith("-") || /^-\d/u.test(next))
+      )) {
+        index += 1;
+        continue;
+      }
+    }
+    if (token.startsWith("-")) continue;
+    routeWords.push(token);
+  }
+
+  return detected === undefined
+    ? undefined
+    : { ...detected, routeWords: Object.freeze([...routeWords]) };
+}
+
+function routeCandidates<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+): readonly (readonly string[])[] {
+  const candidates = new Map<string, readonly string[]>();
+  for (const command of product.commands) {
+    for (let length = 1; length <= command.route.length; length += 1) {
+      const route = command.route.slice(0, length);
+      candidates.set(route.join("\u0000"), route);
+    }
+  }
+  return [...candidates.values()].sort((left, right) =>
+    right.length - left.length || (left.join(" ") < right.join(" ") ? -1 : left.join(" ") > right.join(" ") ? 1 : 0),
+  );
+}
+
+function helpRequest<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+  words: readonly string[],
+  mode: Exclude<CanonHelpMode, "json">,
+): HelpRequest {
+  const routes = routeCandidates(product);
+  for (let start = 0; start < words.length; start += 1) {
+    for (const route of routes) {
+      if (route.every((segment, offset) => words[start + offset] === segment)) {
+        const command = product.commands.find((candidate) =>
+          candidate.route.length === route.length && candidate.route.every((segment, index) => route[index] === segment),
+        );
+        return command === undefined
+          ? { kind: "route", route, mode }
+          : { kind: "command", commandId: command.id, mode };
+      }
+    }
+  }
+  return { kind: "root", mode };
+}
+
+function helpDiscoveryRoute<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+  request: HelpRequest,
+): readonly string[] | undefined {
+  if (request.kind === "route") return request.route;
+  if (request.kind === "command") {
+    return product.commands.find((command) => command.id === request.commandId)?.route;
+  }
+  return undefined;
+}
+
 export async function runNodeCli<const Catalog extends CommandCatalog>(
   product: CompiledProduct<Catalog>,
   argv: readonly string[],
   options: RunNodeCliOptions = {},
 ): Promise<CliResult> {
-  if (options.helpFormat === "json" && argv.includes("--help")) {
-    return { exitCode: 0, stdout: `${JSON.stringify(projectDiscovery(product))}\n`, stderr: "" };
+  const detectedHelp = detectHelp(product, argv);
+  if (detectedHelp !== undefined) {
+    if (detectedHelp.invalidMode !== undefined) {
+      return {
+        exitCode: 2,
+        stdout: "",
+        stderr: `Unknown help mode: ${detectedHelp.invalidMode}\n`,
+        failureKind: "usage",
+      };
+    }
+    const selectedMode = options.helpFormat ?? detectedHelp.mode;
+    const request = helpRequest(product, detectedHelp.routeWords, selectedMode === "json" ? "text" : selectedMode);
+    if (selectedMode === "json") {
+      const route = helpDiscoveryRoute(product, request);
+      return {
+        exitCode: 0,
+        stdout: `${JSON.stringify(projectDiscovery(product, route === undefined ? {} : { route }))}\n`,
+        stderr: "",
+      };
+    }
+    return { exitCode: 0, stdout: renderHelp(product, request), stderr: "" };
   }
 
   let stdout = "";
   let stderr = "";
   let invocation: Promise<CliResult> | undefined;
   const program = new Command(product.name);
+  program.helpOption(false);
+  program.addHelpCommand(false);
   program.exitOverride();
   program.configureOutput({
     writeOut: (value: string) => {
