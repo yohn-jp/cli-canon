@@ -61,7 +61,7 @@ export type InvocationBindings<Command extends CommandDefinition> = Readonly<Par
 export class InvocationProjectionError extends Error {
   readonly code = "INVALID_INVOCATION_BINDING" as const;
   readonly commandId: string;
-  readonly field?: string;
+  readonly field: string | undefined;
 
   constructor(commandId: string, message: string, field?: string) {
     super(message);
@@ -145,16 +145,21 @@ function appendOption(argv: string[], flag: string, value: unknown): void {
   if (value !== true) argv.push(value as string);
 }
 
+export interface InvocationProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
+  readonly name: string;
+  readonly commands: CompiledProduct<Catalog>["commands"];
+}
+
 export function projectInvocation<
   const Catalog extends CommandCatalog,
   const Id extends CommandId<Catalog>,
 >(
-  product: CompiledProduct<Catalog>,
+  product: InvocationProjectionProduct<Catalog>,
   commandId: Id,
   bindings?: InvocationBindings<Catalog[Id]>,
 ): InvocationProjection<Id>;
 export function projectInvocation(
-  product: CompiledProduct,
+  product: InvocationProjectionProduct,
   commandId: string,
   bindings: Readonly<Record<string, unknown>> = {},
 ): InvocationProjection {
