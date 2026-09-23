@@ -1,6 +1,6 @@
 {
   "name": "@yohn-jp/cli-canon",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Internal canonical TypeScript framework for yohn-jp CLI products.",
   "type": "module",
   "main": "./dist/index.js",
@@ -54,5 +54,13 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yohn-jp/cli-canon.git"
+  },
+  "homepage": "https://github.com/yohn-jp/cli-canon#readme",
+  "bugs": {
+    "url": "https://github.com/yohn-jp/cli-canon/issues"
+  }
 }
