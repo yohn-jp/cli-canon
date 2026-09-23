@@ -1,4 +1,5 @@
-import type { CompiledCommand, CompiledProduct } from "../command/compiler.js";
+import type { CompiledProduct } from "../command/compiler.js";
+import type { ProjectionCommandSource, ProjectionProductSource } from "./source.js";
 import type {
   CommandCatalog,
   CommandDefinition,
@@ -77,12 +78,12 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function validOptionToken(field: CompiledCommand["fields"][number], value: unknown): boolean {
+function validOptionToken(field: ProjectionCommandSource["fields"][number], value: unknown): boolean {
   return typeof value === "string" || (field.valueArity === "optional" && value === true);
 }
 
 export function validateInvocationBindings(
-  command: CompiledCommand,
+  command: ProjectionCommandSource,
   bindings: unknown,
 ): asserts bindings is Readonly<Record<string, unknown>> {
   if (!isRecord(bindings)) {
@@ -147,10 +148,7 @@ function appendOption(argv: string[], flag: string, value: unknown): void {
   if (value !== true) argv.push(value as string);
 }
 
-export interface InvocationProjectionProduct {
-  readonly name: string;
-  readonly commands: readonly CompiledCommand[];
-}
+export interface InvocationProjectionProduct extends ProjectionProductSource {}
 
 export function projectInvocation<
   const Catalog extends CommandCatalog,
