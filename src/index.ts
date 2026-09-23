@@ -6,3 +6,5 @@ export * from "./command/compiler.js";
 export * from "./command/errors.js";
 export * from "./projection/help.js";
 export * from "./projection/discovery.js";
+export * from "./skill/index.js";
+export * from "./path/index.js";

@@ -7,6 +7,10 @@ import type {
   CommandId,
   InputDefinition,
 } from "./model.js";
+import { compileSkills, type CompiledSkills } from "../skill/compiler.js";
+import type { SkillCatalog } from "../skill/model.js";
+import { compilePaths } from "../path/paths.js";
+import type { CompiledPaths, PathCatalog } from "../path/model.js";
 
 export interface CompiledField {
   readonly key: string;
@@ -31,13 +35,23 @@ export interface CompiledCommand<
   readonly definition: CommandDefinition<Input, Result>;
 }
 
-export interface CompileProductInput<Catalog extends CommandCatalog> {
+export interface CompileProductInput<
+  Catalog extends CommandCatalog,
+  Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
+  Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
+> {
   readonly name: string;
   readonly commands: Catalog;
   readonly handlers: HandlerMap<Catalog>;
+  readonly skills?: Skills;
+  readonly paths?: Paths;
 }
 
-export interface CompiledProduct<Catalog extends CommandCatalog = CommandCatalog> {
+export interface CompiledProduct<
+  Catalog extends CommandCatalog = CommandCatalog,
+  Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
+  Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
+> {
   readonly name: string;
   readonly commands: readonly CompiledCommand<
     CommandId<Catalog>,
@@ -45,6 +59,8 @@ export interface CompiledProduct<Catalog extends CommandCatalog = CommandCatalog
     Catalog[CommandId<Catalog>]["result"]
   >[];
   readonly handlers: HandlerMap<Catalog>;
+  readonly skills: CompiledSkills<Skills>;
+  readonly paths: CompiledPaths<Paths>;
 }
 
 const LONG_FLAG = /^--[a-z0-9][a-z0-9-]*$/u;
@@ -62,9 +78,13 @@ function signature(field: InputDefinition[string]): string {
   return field.kind;
 }
 
-export function compileProduct<const Catalog extends CommandCatalog>(
-  input: CompileProductInput<Catalog>,
-): CompiledProduct<Catalog> {
+export function compileProduct<
+  const Catalog extends CommandCatalog,
+  const Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
+  const Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
+>(
+  input: CompileProductInput<Catalog, Skills, Paths>,
+): CompiledProduct<Catalog, Skills, Paths> {
   const issues: CanonConstructionIssue[] = [];
   const routes = new Map<string, string>();
   const anywhereFlags = new Map<string, { commandId: string; fieldKey: string; signature: string }>();
@@ -146,9 +166,14 @@ export function compileProduct<const Catalog extends CommandCatalog>(
 
   if (issues.length > 0) throw new CanonConstructionError(issues);
 
+  const skills = compileSkills(input.skills ?? {} as Skills, compiled);
+  const paths = compilePaths(input.paths ?? {} as Paths);
+
   return Object.freeze({
     name: input.name,
     commands: Object.freeze(compiled) as CompiledProduct<Catalog>["commands"],
     handlers: input.handlers,
+    skills,
+    paths,
   });
 }
