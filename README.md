@@ -234,6 +234,18 @@ Release notes live under [`docs/releases/`](./docs/releases/).
 - [0.1.0](./docs/releases/0.1.0.md) — initial public package release.
 - [Releasing CLI Canon](./docs/releases/RELEASING.md) — bootstrap manual publish and subsequent OIDC release workflow.
 
+## Security
+
+Report suspected vulnerabilities privately as described in
+[SECURITY.md](./SECURITY.md). Do not file sensitive vulnerability details in a
+public Issue.
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the repository development,
+architecture, branch, verification, and pull request contracts. Participation
+is governed by the [Code of Conduct](./CODE_OF_CONDUCT.md).
+
 ## Development
 
 ```bash
