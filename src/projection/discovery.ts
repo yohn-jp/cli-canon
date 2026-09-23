@@ -1,4 +1,4 @@
-import type { CompiledProduct } from "../command/compiler.js";
+import type { CompiledCommand } from "../command/compiler.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
 import type { OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
 
@@ -37,7 +37,7 @@ export interface DiscoveryRequest {
 export interface DiscoveryProjectionProduct {
   readonly name: string;
   readonly packageMetadata?: ProductPackageIdentity;
-  readonly commands: readonly import("../command/compiler.js").CompiledCommand[];
+  readonly commands: readonly CompiledCommand[];
 }
 
 function compareCommands(
