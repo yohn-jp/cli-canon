@@ -4,6 +4,7 @@ import { renderHelp } from "../projection/help.js";
 import {
   projectInvocation,
   type CliInvocation,
+  type InvocationProjectionProduct,
   type InvocationRequirement,
 } from "../projection/invocation.js";
 import type { CompiledSkillStep, CompiledSkills, SkillCommandId } from "./compiler.js";
@@ -19,7 +20,7 @@ import { jsonOutput, textOutput } from "../output/policy.js";
 export interface SkillProjectionProduct<
   Catalog extends CommandCatalog,
   Skills extends SkillCatalog,
-> extends CompiledProduct<Catalog> {
+> extends InvocationProjectionProduct<Catalog> {
   readonly skills: CompiledSkills<Skills>;
 }
 
@@ -60,7 +61,7 @@ export interface ProjectedSkill<Id extends string = string, CommandId extends st
 }
 
 function projectedStep<const Catalog extends CommandCatalog, StepCommandId extends string, Id extends string>(
-  product: CompiledProduct<Catalog>,
+  product: InvocationProjectionProduct<Catalog>,
   step: CompiledSkillStep<StepCommandId, Id>,
 ): ProjectedSkillStep<StepCommandId, Id> {
   if (step.kind === "prose") return { kind: "prose", text: step.text };
