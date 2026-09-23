@@ -1,9 +1,9 @@
 # CLI Canon architecture conformance certification
 
-**Subject:** Issue #15, pre-consumer framework contract
-**Base:** `origin/main` at `e38276b0d5a209cd0a34cf4be8e37f68773f74eb`
+**Subject:** Issue #15 certification plus Issue #22 residual-conformance closure
+**Base:** `origin/main` at `3d4bf808989a112b4341192d38626540acb6b759`
 **Audited documents:** [`CANON.md`](../docs/architecture/CANON.md) and [`cli-canon.md`](../docs/architecture/cli-canon.md)
-**Implementation evidence:** this base tree plus the narrowly scoped Issue #15 corrections described below.
+**Implementation evidence:** the merged #15 baseline plus the narrowly scoped Issue #22 corrections described below. Issue #22 exists specifically to correct #15 claims that were stronger than the executable contract.
 
 The `cli-canon.md` document is marked Proposed, but Issue #15 explicitly makes both architecture documents the certification checklist. Declarative architecture clauses are therefore audited here. Historical product survey, sequencing, and rationale text is not treated as a new framework feature. Each checklist row receives exactly one status; there is no unclassified requirement. Section crosswalk rows at the end ensure every architecture-document section is accounted for; they point to, rather than duplicate, the detailed proof rows.
 
@@ -50,6 +50,16 @@ Evidence names refer to test titles in the listed test files. Expected help, JSO
 | HELP-08 | Command ordering is deterministic and does not depend on declaration insertion order. | PROVEN | `contract.test.mjs`: “help and discovery order is deterministic across declaration insertion order” compares both declaration permutations to independent exact expectations. |
 | HELP-09 | No second framework-owned help/usage table is needed for the audited surface. | PROVEN | Help, usage, and discovery use compiled commands/fields (`src/projection/help.ts`, `src/projection/discovery.ts`, `src/node/runner.ts`); exact independent expectations in `contract.test.mjs`. |
 
+### Invocation Canon
+
+| ID | Requirement | Status | Evidence |
+| --- | --- | --- | --- |
+| INV-01 | Executable invocation authority is structured `{ executable, argv }`; shell text is not the execution authority. | PROVEN | `test/runtime/invocation.test.mjs`: exact `CliInvocation` expectation; `src/projection/invocation.ts`. |
+| INV-02 | Invocation argv derives from Command Canon for positional, option, flag, repeatable, optional-value, and raw-argv fields. | PROVEN | `invocation.test.mjs`: exact argv lowering; `test/types/invocation.ts` proves binding shapes from the referenced command. |
+| INV-03 | Missing required bindings do not expose executable argv and instead return `requires-input`. | PROVEN | `invocation.test.mjs`: missing target/out has no `value` or `argv`; Skill projection carries the same state. |
+| INV-04 | Invalid/unknown binding keys and incompatible binding shapes fail explicitly. | PROVEN | `invocation.test.mjs` and `test/types/invocation.ts`; Skill construction maps invalid bindings to `INVALID_COMMAND_BINDING`. |
+| INV-05 | Skill ready invocations consume typed command bindings and expose the canonical structured invocation rather than reparsing display usage. | PROVEN | `skill.test.mjs`: “Skill command bindings derive a ready canonical invocation”; `skillCommand` and `projectInvocation`. |
+
 ### Output and CliIO
 
 | ID | Requirement | Status | Evidence |
@@ -59,12 +69,12 @@ Evidence names refer to test titles in the listed test files. Expected help, JSO
 | OUT-03 | Product/domain failure mapping is explicit and preserves mapped exit, stream, and classification. | PROVEN | `output.test.mjs`: “Node runner uses the typed optional product domain error adapter”; no shared domain taxonomy is introduced. |
 | OUT-04 | Handler-result validation failure is distinguished. | PROVEN | `contract.test.mjs`: “result schema rejects a handler result…”; `failureKind: handler-result`. |
 | OUT-05 | Unexpected framework/handler failure is distinct and non-success. | PROVEN | `output.test.mjs`: “Node runner applies the byte budget… and preserves unexpected failures”. |
-| OUT-06 | Serialization failure cannot report success and is distinct from result validation. | PROVEN | `output.test.mjs`: JSON serialization failures and “Node result serialization failure is distinct…”. |
+| OUT-06 | Serialization failure cannot report success and is distinct from result validation. Unsupported JSON values and non-finite numbers are rejected rather than silently omitted or converted to `null`. | PROVEN | `output.test.mjs`: BigInt/circular/undefined/function/symbol/NaN/±Infinity cases and runner non-finite-result cases; packed consumer repeats non-finite rejection. |
 | OUT-07 | Stream, stdout/stderr, exit code, and failure classification form one outcome. | PROVEN | `output.test.mjs`: “CliIO writes the outcome stream…” checks exact writes and `CliResult`; domain adapter exact outcome. |
 | OUT-08 | UTF-8 budget is applied to encoded final output, with below/equal/above-cap behavior. | PROVEN | `output.test.mjs`: “JSON byte budget includes Unicode and the final newline at below, exact, and above limits”; `src/output/policy.ts`. |
 | OUT-09 | Multibyte Unicode and the final newline count toward the exact byte budget. | PROVEN | Same test compares `Buffer.byteLength` for `雪` and exact emitted `\n`. |
 | OUT-10 | Valid JSON is never byte-truncated: below-cap result is a budget failure on stderr, not a partial success document; exact/above outputs parse fully. | PROVEN | Same output test asserts below-cap failure/empty output, exact and above success, and `JSON.parse` of the complete exact output; packed consumer repeats boundary behavior. |
-| OUT-11 | Skill text and JSON share output-budget behavior and reject rather than silently truncate. | PROVEN | `skill.test.mjs`: “bounded Skill text and JSON use the shared byte budget without truncation”; `src/skill/projection.ts`. |
+| OUT-11 | Skill text and JSON share output-budget behavior, default to 4096 bytes, reject invalid too-small budgets, and fail rather than silently truncate. | PROVEN | `skill.test.mjs`: default/explicit/invalid/over-budget cases; `DEFAULT_SKILL_OUTPUT_BUDGET_BYTES`; `src/skill/projection.ts`. |
 
 ### Path Canon
 
@@ -88,12 +98,12 @@ Evidence names refer to test titles in the listed test files. Expected help, JSO
 | SKILL-01 | Skill IDs derive from the declared catalog. | PROVEN | `test/types/skill-contracts.ts`: positive/negative `SkillId`; `skill.test.mjs`. |
 | SKILL-02 | Skill command steps use Command IDs and invalid/unknown IDs fail. | PROVEN | Type tests and `skill.test.mjs`: “Skill compilation rejects unknown command references at construction”. |
 | SKILL-03 | Prose-only steps remain valid. | PROVEN | `skill.test.mjs`: prose steps in command-backed and no-command Skills; type test `proseOnlySkills`. |
-| SKILL-04 | Missing command bindings/prerequisites are represented as `requires-input`, not executable argv. | PROVEN | `skill.test.mjs`: “Skill projection derives command metadata…” expects field/prerequisite requirements; `src/skill/projection.ts`. |
+| SKILL-04 | Missing command bindings/prerequisites are represented as `requires-input`, not executable argv; fully bound commands expose only the canonical `{ executable, argv }` invocation. | PROVEN | `skill.test.mjs` required-input and ready-binding cases; `INV-01–05`; `src/skill/projection.ts`. |
 | SKILL-05 | Intent, invariants, and opaque domain-result references project without recomputing their meaning. | PROVEN | `skill.test.mjs`: “Skill metadata and delegation…” checks exact metadata/text; `src/skill/projection.ts` copies references. |
 | SKILL-06 | Public Skill projection cannot reference private Commands; visibility values are validated. | PROVEN | `skill.test.mjs`: “Skill compilation rejects unknown delegation, cycles, and private commands”; `src/skill/compiler.ts`. |
 | SKILL-07 | Delegation references are validated and delegation cycles rejected. | PROVEN | Same skill test; `test/types/skill-contracts.ts` positive/negative delegation IDs. |
-| SKILL-08 | Skill text/JSON output is deterministic, complete, and valid JSON. | PROVEN | `skill.test.mjs`: independent exact text, long content intact, repeated text/JSON equality, JSON parse equality. |
-| SKILL-09 | Bounded Skill output uses shared output policy and fails explicitly instead of truncating. | PROVEN | `skill.test.mjs`: exact-cap success and below-cap `OutputPolicyError` for text and JSON. |
+| SKILL-08 | Skill text/JSON output is deterministic and complete within its declared budget; content exceeding the default budget fails explicitly, while a sufficiently large explicit budget preserves the complete document. | PROVEN | `skill.test.mjs`: independent exact text and long-content default-failure/explicit-budget success; JSON parse equality. |
+| SKILL-09 | Skill output has a canonical 4096-byte default; declared or selected budgets smaller than the framework budget diagnostic are rejected, and cap overflow fails explicitly instead of truncating. | PROVEN | `skill.test.mjs`: default 4096, invalid declared/selected budgets, exact-cap success and over-budget `OutputPolicyError`; `src/skill/model.ts`. |
 | SKILL-10 | Skill remains guidance/projection; product lifecycle, authorization, and domain-result decisions are not recomputed. | PROVEN | `src/skill/projection.ts` projects declared metadata and derives only generic required-input state; tests preserve opaque result references/invariants; no domain engine/API exists. |
 
 ### Product and public contract
@@ -104,7 +114,7 @@ Evidence names refer to test titles in the listed test files. Expected help, JSO
 | PUB-02 | Package identity has no second framework version literal or ambient package lookup. | PROVEN | `package.json` is the package-version authority; `src/product/identity.ts` and `CompileProductInput.packageMetadata` require explicit supplied metadata; `projectDiscovery` copies it. `src/**` contains no package version literal. |
 | PUB-03 | Public discovery is JSON-safe data and omits handlers, functions/secrets, Zod/Commander instances, and internal runtime state. | PROVEN | `public-contract.test.mjs` JSON roundtrip and explicit `handlers`/`privateKey` exclusion; `src/projection/discovery.ts` constructs an allowlisted projection. |
 | PUB-04 | Framework-owned schemas distinguish `complete` from `structural-only` and identify input/output direction. | PROVEN | `public-contract.test.mjs`: “compiled input and output schemas…” and schema completeness test; `src/projection/schema.ts`. |
-| PUB-05 | A schema that cannot truthfully be projected as complete fails explicitly; structural-only remains labelled. | PROVEN | `public-contract.test.mjs`: transform/refinement cases assert `SchemaProjectionError` and `structural-only`. |
+| PUB-05 | A schema that cannot truthfully be projected as complete fails explicitly; when a product declares a complete public-schema contract, admission occurs during `compileProduct`; structural-only remains labelled. | PROVEN | `public-contract.test.mjs`: direct projection cases plus “declared complete schema projection is admitted during product construction”; `UNSUPPORTED_SCHEMA_PROJECTION`. |
 | PUB-06 | Testing-only certification API is outside the root runtime exports/import graph. | PROVEN | `src/index.ts` does not export `src/testing`; packed consumer asserts root lacks `certifyScenarios`; package purity test. |
 
 ### Exact packed distribution
@@ -115,7 +125,7 @@ Evidence names refer to test titles in the listed test files. Expected help, JSO
 | DIST-02 | Public root, Node subpath, and testing subpath runtime imports and public type imports work from the installed tarball. | PROVEN | Same package consumer installs `file:${tarball}`, executes all three APIs, and invokes TypeScript against root/node/testing imports. |
 | DIST-03 | Root import is pure for the exact tarball and built entry; source root consists only of the same declarations/projection exports. | PROVEN | `test/package/root-import-purity.mjs` guards argv, exit, streams, signal handlers, filesystem, process, and network effects; invoked for installed tarball and built output; `src/index.ts` is export-only. |
 | DIST-04 | Node adapter is isolated at `@yohn-jp/cli-canon/node`; testing helpers do not leak to root. | PROVEN | Packed export map/type/runtime consumer assertions and `src/index.ts`. |
-| DIST-05 | Source, built JS, and exact packed package share an independent scenario oracle where applicable. | PROVEN | `fixture.test.mjs` certifies the same oracle against source and built lanes; packed consumer uses copied `fixture-scenario.mjs` and `fixture-oracle.mjs` against the one installed tarball. |
+| DIST-05 | Source, built JS, and exact packed package share an independent scenario contract carrying stable ID, target command, explicit input/expectation, required lanes, and optional setup. | PROVEN | `testing.test.mjs` proves scenario structure and missing-lane rejection; `fixture.test.mjs` uses required source/built lanes; packed consumer uses the same scenario contract with the packed lane. |
 | DIST-06 | Packed expected behavior is independent of the production projector; dry-run/source-only evidence is not substituted. | PROVEN | `fixture-oracle.mjs` contains literal expected help/discovery/output; `consumer.mjs` installs and runs the exact tarball created by `pnpm pack`. |
 
 ### C01–C12 invariant acceptance map
@@ -125,13 +135,13 @@ Evidence names refer to test titles in the listed test files. Expected help, JSO
 | C01 — command/path/Skill IDs are declaration-derived. | PROVEN | `test/types/contracts.ts`, `path-canon.ts`, `skill-contracts.ts`; `CMD-01`, `PATH-01`, `SKILL-01`. |
 | C02 — command owns typed input/handler/result; executable commands cannot lack a binding. | PROVEN | Positive/negative handler types, runtime missing/extra handler construction rejection, and result validation; `test/types/contracts.ts`, `contract.test.mjs`. |
 | C03 — invalid references, collisions, cycles, and unsupported grammar fail at construction. | PROVEN | Command, Path, Skill construction-error tests; `CMD-16/17` classify the two backend limits explicitly. |
-| C04 — parser, usage, help, discovery, and Skill invocation metadata derive from CompiledProduct. | PROVEN | `contract.test.mjs`, `skill.test.mjs`; `src/node/runner.ts`, `src/projection/*`, `src/skill/projection.ts`. |
+| C04 — parser, usage, help, discovery, and structured Skill invocation metadata derive from CompiledProduct. | PROVEN | `contract.test.mjs`, `invocation.test.mjs`, `skill.test.mjs`; `src/node/runner.ts`, `src/projection/*`, `src/skill/projection.ts`. |
 | C05 — untrusted argv is decoded before handlers. | PROVEN | `contract.test.mjs`: invalid Zod input fails before success; `src/node/runner.ts`. |
 | C06 — consumer domain schema, authorization, and lifecycle decisions are not duplicated. | PROVEN | Opaque domain adapter/reference tests; framework has generic mapping/projection only and no consumer imports or migrations. |
 | C07 — Path is an address, not permission, and resolution is side-effect free. | PROVEN | `PATH-07–09`; `src/path/paths.ts`. |
-| C08 — complete output/error/exit contract; JSON and required guidance are not silently truncated. | PROVEN | `OUT-01–11`, `SKILL-08/09`. |
+| C08 — complete output/error/exit contract; JSON does not silently coerce unsupported/non-finite values and required guidance is not silently truncated. | PROVEN | `OUT-01–11`, `SKILL-08/09`; strict JSON and Skill-budget tests. |
 | C09 — root imports remain side-effect free. | PROVEN | `DIST-03`, exact packed and built import purity tests. |
-| C10 — reusable scenario input coexists with an independent expected oracle. | PROVEN | `fixture-scenario.mjs`, `fixture-oracle.mjs`, source/built and packed package tests. |
+| C10 — reusable scenario contract carries command/input/setup/required lanes while retaining an independent expected oracle. | PROVEN | `testing.test.mjs`, `fixture-scenario.mjs`, `fixture-oracle.mjs`, source/built and packed package tests. |
 | C11 — existing consumer public behavior is preserved during framework adoption. | NOT_APPLICABLE | No consumer repository or consumer public contract is changed or claimed in this pre-consumer certification. Framework contract cases are independently tested; consumer migrations remain gated. |
 | C12 — checked-in generated artifacts are regenerated/checked from authority. | NOT_APPLICABLE | This repository has no checked-in generated Canon artifacts or generator/check command. TypeScript build output is produced during verification and is not a maintained generated source table. |
 
@@ -192,16 +202,16 @@ Every numbered section in both audited documents is listed. Where a section cont
 | cli-canon.md §7.3 | Existing consumer domain decoders are retained at handler boundary. | PROVEN | Generic typed domain adapter and opaque Skill result refs; no consumer domain schemas or imports in framework. |
 | cli-canon.md §7.4 | Schema projection distinguishes complete/structural-only and rejects false completeness. | PROVEN | PUB-04/05. |
 | cli-canon.md §8.1a | Compiler validates declarations, references, grammar, Path/Skill relations, and command/handler bindings before execution. | PROVEN | Construction tests in command/Path/Skill; missing/unknown handlers fail with `INVALID_HANDLER_BINDING`; no handler executes during compilation. |
-| cli-canon.md §8.1b | A requested complete schema projection is checked before it is emitted; `compileProduct` does not claim every optional projection is complete before a caller requests one. | PROVEN | `public-contract.test.mjs`: unsupported complete schemas throw from `projectSchema`/`projectProductSchemas`; no unsupported schema is emitted as complete. |
+| cli-canon.md §8.1b | Public projection checks occur during construction for declared contracts: help/discovery/Skill projections are admitted, and a declared complete schema projection must succeed before `compileProduct` returns. | PROVEN | `src/command/compiler.ts`; `public-contract.test.mjs` construction-time complete-schema rejection; Skill budget construction tests. |
 | cli-canon.md §8.2 | Nested/optional/alias/repeat/`--`/placement/option-value grammar is admitted or rejected explicitly. | PROVEN | CMD-01–18. |
 | cli-canon.md §8.3 | Isolated adapter maps parser/decode/domain/result/unexpected failures through CliIO/output policy. | PROVEN | OUT-01–07; runner and output tests. |
-| cli-canon.md §8.4 | Skill invocation metadata derives route/usage/help and reports unbound required values as `requires-input`. | PROVEN | SKILL-02/04; `src/skill/projection.ts`; no shell-string reparse/executor is exposed. |
+| cli-canon.md §8.4 | Invocation authority is `{ executable, argv }`; Skill bindings lower through Command Canon, while missing values remain `requires-input`; usage is display-only and is never reparsed for execution. | PROVEN | INV-01–05, SKILL-04; `src/projection/invocation.ts`; `src/skill/projection.ts`. |
 | cli-canon.md §9 | Path root/segments/parameters/kind and explicit context/precedence; cycle/traversal rejection; lexical aliases; no mutation/authorization. | PROVEN | PATH-01–09. |
 | cli-canon.md §10.1a | Skill intent/steps/delegation/visibility and reference constraints. | PROVEN | SKILL-01–10. |
 | cli-canon.md §10.1b | Product-specific `skill` runtime command wiring and the decision to add it during consumer migration. | NOT_APPLICABLE | This certifies framework projections only; no consumer CLI surface is migrated or given a new command. |
-| cli-canon.md §10.2a | Encoding then exact UTF-8 budget then output response; valid JSON and required content are not truncated. | PROVEN | OUT-06–11; output policy and Skill tests. |
-| cli-canon.md §10.2b | 4096-byte default Skill budget and minimum diagnostic-size tuning. | NOT_APPLICABLE | The design calls 4096 a starting point for consumer migration; Issue #15 requires shared explicit byte-budget behavior, not a default cap or product-specific budget choice. Certification makes no consumer default-budget claim. |
-| cli-canon.md §11.1 | Shared scenario inputs can run against source/build/pack while product-specific fixture logic stays external. | PROVEN | `fixture-scenario.mjs`, runtime fixture test, package consumer. |
+| cli-canon.md §10.2a | Encoding then exact UTF-8 budget then output response; machine JSON rejects unsupported/non-finite values and complete JSON/required content are not truncated. | PROVEN | OUT-06–11; strict JSON, output-policy, runner, and Skill tests. |
+| cli-canon.md §10.2b | 4096-byte default Skill budget, explicit minimum diagnostic capacity, and explicit scenario-overflow failure. | PROVEN | `DEFAULT_SKILL_OUTPUT_BUDGET_BYTES`, `MIN_SKILL_OUTPUT_BUDGET_BYTES`; `skill.test.mjs` default/invalid/over-budget cases; compile-time Skill projection admission. |
+| cli-canon.md §11.1 | Reusable scenarios carry stable ID, target command reference, setup, input, independent expectation, and required lanes, and run against source/build/pack while product-specific fixture logic stays external. | PROVEN | `src/testing/index.ts`; `testing.test.mjs`; `fixture-scenario.mjs`; source/built runtime fixture and exact packed consumer. |
 | cli-canon.md §11.2 | Expected behavior is independent and not auto-generated from the projector. | PROVEN | `fixture-oracle.mjs`; literal assertions in runtime tests. |
 | cli-canon.md §11.3 | One exact packed artifact proves exports, types, import purity, runtime. | PROVEN | `test/package/consumer.mjs`; DIST-01–06. |
 | cli-canon.md §12.1 | Required positive/negative types, construction, boundary, projections, output, paths, package proof. | PROVEN | `test/types/**`, detailed matrix rows, full verification. |
@@ -227,6 +237,18 @@ M0's `optionLookingValuePolicy: "consume"` is supported and tested. This certifi
 
 **The previously identified framework blocker is cleared at the framework-contract level.** Current CLI Canon represents `--help[=full|json]`, root/domain/leaf progressive help, full help, command/positional/option descriptions, examples, usage, and JSON discovery from one compiled Command Canon. The independent expectations and runtime cases are in `contract.test.mjs`. This does not claim Wabachi has migrated or that its repository was modified.
 
+## Residual conformance closure (#22)
+
+The post-merge cross-review of #15 identified five places where the certification text was stronger than the executable contract. Issue #22 closes those gaps without weakening either architecture document:
+
+1. **Canonical invocation:** adds typed binding-to-argv lowering and a ready-only structured `{ executable, argv }` authority; missing bindings remain non-executable.
+2. **Strict machine JSON:** rejects non-finite numbers and unsupported nested values instead of accepting JSON.stringify's silent omission/`null` coercions.
+3. **Projection admission:** `compileProduct` admits help/discovery/Skill projections and validates any declared complete-schema contract before returning the compiled product.
+4. **Skill budget:** establishes the canonical 4096-byte default, minimum diagnostic capacity, and explicit over-budget failure.
+5. **Certification scenario contract:** stable ID, target command, input, expectation, required lanes, and optional setup are now first-class reusable harness data.
+
+Executable evidence is in `invocation.test.mjs`, `output.test.mjs`, `public-contract.test.mjs`, `skill.test.mjs`, `testing.test.mjs`, the type suites, and the exact packed consumer.
+
 ## Production defects found and minimally corrected
 
 1. **Failed invariant:** `cli-canon.md` §8.1 and CANON §5.2 / C02 require a command's execution binding to be validated before execution. **Observable failure:** `compileProduct` accepted a JavaScript caller's missing handler, and invocation later returned `UNEXPECTED: handler is not a function`. **Root cause:** handler coverage was enforced only by TypeScript's `HandlerMap`. **Minimal correction:** validate every declared command has an own function handler and reject unmatched extra handlers at construction with `INVALID_HANDLER_BINDING`.
@@ -235,4 +257,4 @@ M0's `optionLookingValuePolicy: "consume"` is supported and tested. This certifi
 
 ## Changes and verification record
 
-Certification changes are limited to the three minimal production corrections above; focused proof for construction bindings, compiled snapshots, required pre-route options, explicit trailing required-option-value rejection, declaration-order-independent help/discovery ordering, a below-cap JSON assertion that rules out truncated success output, a lexical Path alias case, and this evidence matrix. No consumer repository, `.github/**`, or canonical architecture document changed.
+The #15 certification changes remain the three corrections listed above. Issue #22 adds only the five residual conformance closures documented here and their focused source/type/runtime/packed evidence. No consumer repository, `.github/**`, parser backend, product-domain authority, or canonical architecture document changed.
