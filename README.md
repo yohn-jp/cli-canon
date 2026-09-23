@@ -154,6 +154,23 @@ Skill command bindings use the same projection through `skillCommand(...)`; usag
 
 Text help and JSON discovery derive from the same compiled command graph.
 
+For incremental migrations that must preserve an established terminal format, the Node adapter exposes a typed help-presentation hook. Canon still parses the help mode and resolves the target route; the adapter receives that resolved request plus scoped discovery metadata and may only render the product-specific terminal shape:
+
+```ts
+import { textOutput } from "@yohn-jp/cli-canon";
+import { runNodeCli } from "@yohn-jp/cli-canon/node";
+
+await runNodeCli(product, argv, {
+  legacyRoutes,
+  terminalAdapter: {
+    help: ({ mode, request, discovery }) =>
+      textOutput(renderProductHelp({ mode, request, discovery })),
+  },
+});
+```
+
+This keeps help-mode parsing, route ownership, discovery composition, and command metadata in CLI Canon while allowing compatibility presentation without parsing Canon-rendered text.
+
 Pass package metadata at composition time when package identity should be projected:
 
 ```ts
@@ -225,6 +242,8 @@ The README is an entry point, not a second architecture authority.
 
 Release notes live under [`docs/releases/`](./docs/releases/).
 
+- [0.1.7](./docs/releases/0.1.7.md) — typed help-presentation compatibility hook for incremental migrations.
+- [0.1.6](./docs/releases/0.1.6.md) — Canon-owned mixed-migration help/discovery and Node presentation surfaces.
 - [0.1.0](./docs/releases/0.1.0.md) — initial public package release.
 - [Releasing CLI Canon](./docs/releases/RELEASING.md) — bootstrap manual publish and subsequent OIDC release workflow.
 

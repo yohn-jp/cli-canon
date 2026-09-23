@@ -149,6 +149,53 @@ test("mixed route projection composes summary, full, and JSON help from one boun
   );
 });
 
+test("terminal adapter can render consumer help from Canon-resolved metadata without reparsing argv", async () => {
+  const { product, legacyRoutes } = architectureFixture();
+  const terminal = await runNodeCli(product, ["architecture", "example", "--help"], {
+    legacyRoutes,
+    terminalAdapter: {
+      help: ({ mode, request, discovery }) => {
+        assert.equal(mode, "summary");
+        assert.equal(request.kind, "command");
+        assert.equal(request.commandId, "architecture.example");
+        const command = discovery.commands[0];
+        assert.equal(command?.id, "architecture.example");
+        assert.deepEqual(command?.route, ["architecture", "example"]);
+        assert.equal(command?.summary, "Show an architecture example.");
+        assert.deepEqual(command?.examples, ["fixture architecture example --format=full"]);
+        return textOutput(
+          [
+            "Fixture help (urn:fixture:command-contract:1.0.0)",
+            "",
+            `Usage: fixture ${command.route.join(" ")} [--help[=full|json]]`,
+            command.summary,
+            "",
+            "Options:",
+            "  --help[=full|json]  Show progressive help; use --help=full for the complete command reference or --help=json for discovery.",
+            "",
+            "Examples:",
+            `  ${command.examples[0]}`,
+            "",
+          ].join("\n"),
+        );
+      },
+    },
+  });
+
+  assert.deepEqual(terminal, {
+    exitCode: 0,
+    stdout:
+      "Fixture help (urn:fixture:command-contract:1.0.0)\n\n" +
+      "Usage: fixture architecture example [--help[=full|json]]\n" +
+      "Show an architecture example.\n\n" +
+      "Options:\n" +
+      "  --help[=full|json]  Show progressive help; use --help=full for the complete command reference or --help=json for discovery.\n\n" +
+      "Examples:\n" +
+      "  fixture architecture example --format=full\n",
+    stderr: "",
+  });
+});
+
 test("mixed route composition rejects duplicate and overlapping ownership deterministically", () => {
   const { product, legacyRoutes } = architectureFixture();
   const descriptor = (id, route) => ({ id, route, summary: "Legacy route.", fields: [] });

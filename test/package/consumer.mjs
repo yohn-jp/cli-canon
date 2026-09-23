@@ -159,6 +159,12 @@ const helpRequest = parseHelpMode(composed, ["echo", "--help=full"]);
 if (helpRequest !== undefined) void projectHelp(composed, helpRequest);
 const terminalAdapter: NodeCliTerminalAdapter<typeof commands> = {
   success: ({ result }) => textOutput(result.message),
+  help: ({ mode, request, discovery }) => {
+    mode satisfies "summary" | "full" | "json";
+    request.kind satisfies "root" | "route" | "command";
+    discovery.commands[0]?.id satisfies string | undefined;
+    return textOutput("custom help\\n");
+  },
   usageFailure: ({ code }) => {
     const structuredCode: StructuredUsageErrorCode = code;
     return textOutput(structuredCode);
