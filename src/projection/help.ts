@@ -1,4 +1,4 @@
-import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
+import type { CompiledCommand, CompiledField } from "../command/compiler.js";
 
 export type HelpMode = "text" | "full";
 
