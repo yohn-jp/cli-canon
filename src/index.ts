@@ -8,6 +8,7 @@ export type { ProductBinIdentity, ProductPackageIdentity } from "./product/ident
 export * from "./projection/help.js";
 export * from "./projection/discovery.js";
 export * from "./projection/schema.js";
+export * from "./projection/invocation.js";
 export * from "./skill/index.js";
 export * from "./path/index.js";
 export * from "./output/index.js";
