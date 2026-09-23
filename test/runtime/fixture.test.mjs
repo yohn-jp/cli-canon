@@ -23,7 +23,7 @@ test("independent scenario expectations certify source and built JS", async () =
     import("../../src/node/index.ts"),
   ]);
   await certifyScenarios(
-    [createCertificationScenario(packageMetadata)],
+    [createCertificationScenario(packageMetadata, ["built", "source"])],
     [
       { id: "built", context: { api, node } },
       { id: "source", context: { api: sourceApi, node: sourceNode } },
