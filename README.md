@@ -74,13 +74,7 @@ const product = compileProduct({
   schemaProjectionCompleteness: "complete",
 });
 
-const result = await runNodeCli(product, [
-  "document",
-  "render",
-  "input.md",
-  "--out",
-  "out.html",
-]);
+const result = await runNodeCli(product, ["document", "render", "input.md", "--out", "out.html"]);
 
 const invocation = projectInvocation(product, "document.render", {
   file: "input.md",
@@ -112,11 +106,11 @@ A CLI fact is authored once. Routing, usage, progressive help, JSON discovery, S
 
 ## Package surfaces
 
-| Import | Purpose |
-| --- | --- |
-| `@yohn-jp/cli-canon` | Authoring, compiler, projections, Path/Skill/Output Canon |
-| `@yohn-jp/cli-canon/node` | Node.js / Commander runtime adapter |
-| `@yohn-jp/cli-canon/testing` | Reusable source/built/packed certification primitives |
+| Import                       | Purpose                                                   |
+| ---------------------------- | --------------------------------------------------------- |
+| `@yohn-jp/cli-canon`         | Authoring, compiler, projections, Path/Skill/Output Canon |
+| `@yohn-jp/cli-canon/node`    | Node.js / Commander runtime adapter                       |
+| `@yohn-jp/cli-canon/testing` | Reusable source/built/packed certification primitives     |
 
 The root import is side-effect free. Commander is private to the Node adapter.
 
@@ -222,9 +216,9 @@ The current architecture-conformance baseline is recorded in [`test/architecture
 
 The README is an entry point, not a second architecture authority.
 
-| Authority | Scope |
-| --- | --- |
-| [Canonical architecture](./docs/architecture/CANON.md) | Normative ownership, boundaries, and implementation rules |
+| Authority                                               | Scope                                                           |
+| ------------------------------------------------------- | --------------------------------------------------------------- |
+| [Canonical architecture](./docs/architecture/CANON.md)  | Normative ownership, boundaries, and implementation rules       |
 | [Architecture design](./docs/architecture/cli-canon.md) | Cross-product rationale, admission corpus, and migration design |
 
 ## Releases

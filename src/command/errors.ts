@@ -27,9 +27,13 @@ export class CanonConstructionError extends Error {
   constructor(issues: readonly CanonConstructionIssue[]) {
     super(issues.map((issue) => issue.message).join("; "));
     this.name = "CanonConstructionError";
-    this.issues = Object.freeze(issues.map((issue) => Object.freeze({
-      ...issue,
-      ...(issue.fields === undefined ? {} : { fields: Object.freeze([...issue.fields]) }),
-    })));
+    this.issues = Object.freeze(
+      issues.map((issue) =>
+        Object.freeze({
+          ...issue,
+          ...(issue.fields === undefined ? {} : { fields: Object.freeze([...issue.fields]) }),
+        }),
+      ),
+    );
   }
 }

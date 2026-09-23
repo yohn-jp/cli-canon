@@ -6,10 +6,7 @@ export type OptionValueArity = "required" | "optional";
 export type OptionLookingValuePolicy = "consume" | "reject";
 export type CommandVisibility = "public" | "private";
 
-export interface PositionalField<
-  Schema extends AnySchema = AnySchema,
-  Required extends boolean = boolean,
-> {
+export interface PositionalField<Schema extends AnySchema = AnySchema, Required extends boolean = boolean> {
   readonly kind: "positional";
   readonly schema: Schema;
   readonly required: Required;
@@ -75,14 +72,18 @@ export type CommandCatalog = Readonly<Record<string, CommandDefinition>>;
 
 export type FieldOutput<Field extends FieldDefinition> =
   Field extends PositionalField<infer Schema, infer Required>
-    ? Required extends true ? z.output<Schema> : z.output<Schema> | undefined
+    ? Required extends true
+      ? z.output<Schema>
+      : z.output<Schema> | undefined
     : Field extends OptionField<infer Schema, infer Repeatable, infer Required, infer ValueArity>
       ? Repeatable extends true
         ? ValueArity extends "optional"
           ? readonly (z.output<Schema> | undefined)[]
           : readonly z.output<Schema>[]
         : Required extends true
-          ? ValueArity extends "optional" ? z.output<Schema> | undefined : z.output<Schema>
+          ? ValueArity extends "optional"
+            ? z.output<Schema> | undefined
+            : z.output<Schema>
           : z.output<Schema> | undefined
       : Field extends FlagField
         ? boolean

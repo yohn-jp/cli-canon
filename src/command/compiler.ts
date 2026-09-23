@@ -112,13 +112,12 @@ function snapshotField(field: FieldDefinition): FieldDefinition {
     : Object.freeze({ ...field });
 }
 
-function snapshotCommandDefinition<
-  Input extends InputDefinition,
-  Result extends z.ZodType,
->(definition: CommandDefinition<Input, Result>): CommandDefinition<Input, Result> {
-  const input = Object.freeze(Object.fromEntries(
-    Object.entries(definition.input).map(([key, field]) => [key, snapshotField(field)]),
-  )) as Input;
+function snapshotCommandDefinition<Input extends InputDefinition, Result extends z.ZodType>(
+  definition: CommandDefinition<Input, Result>,
+): CommandDefinition<Input, Result> {
+  const input = Object.freeze(
+    Object.fromEntries(Object.entries(definition.input).map(([key, field]) => [key, snapshotField(field)])),
+  ) as Input;
   const orderedOptionGroups = definition.orderedOptionGroups?.map((group) => Object.freeze([...group]));
   return Object.freeze({
     route: Object.freeze([...definition.route]) as CommandDefinition<Input, Result>["route"],
@@ -136,10 +135,7 @@ function snapshotHandlers<Catalog extends CommandCatalog>(handlers: HandlerMap<C
   return Object.freeze(Object.fromEntries(Object.entries(handlers))) as HandlerMap<Catalog>;
 }
 
-function compilePackageMetadata(
-  value: unknown,
-  issues: CanonConstructionIssue[],
-): ProductPackageIdentity | undefined {
+function compilePackageMetadata(value: unknown, issues: CanonConstructionIssue[]): ProductPackageIdentity | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
     issues.push({
@@ -150,7 +146,12 @@ function compilePackageMetadata(
   }
 
   const { name, version } = value;
-  if (typeof name !== "string" || name.trim().length === 0 || typeof version !== "string" || version.trim().length === 0) {
+  if (
+    typeof name !== "string" ||
+    name.trim().length === 0 ||
+    typeof version !== "string" ||
+    version.trim().length === 0
+  ) {
     issues.push({
       code: "INVALID_PRODUCT_IDENTITY",
       message: "packageMetadata must have a non-empty name and version",
@@ -204,9 +205,7 @@ export function compileProduct<
   const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   const Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
->(
-  input: CompileProductInput<Catalog, Skills, Paths>,
-): CompiledProduct<Catalog, Skills, Paths> {
+>(input: CompileProductInput<Catalog, Skills, Paths>): CompiledProduct<Catalog, Skills, Paths> {
   const issues: CanonConstructionIssue[] = [];
   const packageMetadata = compilePackageMetadata(input.packageMetadata, issues);
   const routes = new Map<string, string>();
@@ -240,15 +239,26 @@ export function compileProduct<
   }
 
   for (const [commandId, definition] of Object.entries(input.commands)) {
-    if (definition.visibility !== undefined && definition.visibility !== "public" && definition.visibility !== "private") {
+    if (
+      definition.visibility !== undefined &&
+      definition.visibility !== "public" &&
+      definition.visibility !== "private"
+    ) {
       issues.push({
         code: "INVALID_COMMAND_VISIBILITY",
         commandId,
         message: `${commandId}: visibility must be public or private`,
       });
     }
-    if (definition.route.length === 0 || definition.route.some((segment) => segment.trim() === "" || /\s/u.test(segment))) {
-      issues.push({ code: "INVALID_ROUTE", commandId, message: `${commandId}: route segments must be non-empty single tokens` });
+    if (
+      definition.route.length === 0 ||
+      definition.route.some((segment) => segment.trim() === "" || /\s/u.test(segment))
+    ) {
+      issues.push({
+        code: "INVALID_ROUTE",
+        commandId,
+        message: `${commandId}: route segments must be non-empty single tokens`,
+      });
     }
     const routeKey = definition.route.join("\u0000");
     const existingRoute = routes.get(routeKey);
@@ -269,10 +279,12 @@ export function compileProduct<
     const fields: CompiledField[] = [];
 
     for (const group of definition.orderedOptionGroups ?? []) {
-      const validGroup = group.length > 1 && group.every((fieldKey) => {
-        const field = definition.input[fieldKey];
-        return field?.kind === "option" && field.repeatable;
-      });
+      const validGroup =
+        group.length > 1 &&
+        group.every((fieldKey) => {
+          const field = definition.input[fieldKey];
+          return field?.kind === "option" && field.repeatable;
+        });
       if (!validGroup) {
         issues.push({
           code: "INVALID_INPUT_GRAMMAR",
@@ -315,12 +327,22 @@ export function compileProduct<
       }
       for (const candidate of fieldFlags(field)) {
         if (!(LONG_FLAG.test(candidate) || SHORT_FLAG.test(candidate))) {
-          issues.push({ code: "INVALID_FLAG", commandId, field: fieldKey, message: `${commandId}.${fieldKey}: invalid flag ${candidate}` });
+          issues.push({
+            code: "INVALID_FLAG",
+            commandId,
+            field: fieldKey,
+            message: `${commandId}.${fieldKey}: invalid flag ${candidate}`,
+          });
           continue;
         }
         const existingField = localFlags.get(candidate);
         if (existingField !== undefined) {
-          issues.push({ code: "FLAG_COLLISION", commandId, field: fieldKey, message: `${commandId}: ${candidate} is used by both ${existingField} and ${fieldKey}` });
+          issues.push({
+            code: "FLAG_COLLISION",
+            commandId,
+            field: fieldKey,
+            message: `${commandId}: ${candidate} is used by both ${existingField} and ${fieldKey}`,
+          });
         } else {
           localFlags.set(candidate, fieldKey);
         }
@@ -355,54 +377,67 @@ export function compileProduct<
           }
         }
       }
-      fields.push(Object.freeze({
-        key: fieldKey,
-        kind: field.kind,
-        ...(field.kind === "positional"
-          ? { required: field.required, ...(field.description === undefined ? {} : { description: field.description }) }
-          : {}),
-        ...(field.kind === "option" || field.kind === "flag"
-          ? {
-            flag: field.flag,
-            aliases: Object.freeze([...field.aliases]),
-            placement: field.placement,
-            ...(field.description === undefined ? {} : { description: field.description }),
-          }
-          : {}),
-        ...(field.kind === "option"
-          ? {
-            repeatable: field.repeatable,
-            required: field.required,
-            valueArity: field.valueArity,
-            optionLookingValuePolicy: field.optionLookingValuePolicy,
-          }
-          : {}),
-        ...(field.kind === "positional" || field.kind === "option"
-          ? (field.metavar === undefined ? {} : { metavar: field.metavar })
-          : {}),
-      }));
+      fields.push(
+        Object.freeze({
+          key: fieldKey,
+          kind: field.kind,
+          ...(field.kind === "positional"
+            ? {
+                required: field.required,
+                ...(field.description === undefined ? {} : { description: field.description }),
+              }
+            : {}),
+          ...(field.kind === "option" || field.kind === "flag"
+            ? {
+                flag: field.flag,
+                aliases: Object.freeze([...field.aliases]),
+                placement: field.placement,
+                ...(field.description === undefined ? {} : { description: field.description }),
+              }
+            : {}),
+          ...(field.kind === "option"
+            ? {
+                repeatable: field.repeatable,
+                required: field.required,
+                valueArity: field.valueArity,
+                optionLookingValuePolicy: field.optionLookingValuePolicy,
+              }
+            : {}),
+          ...(field.kind === "positional" || field.kind === "option"
+            ? field.metavar === undefined
+              ? {}
+              : { metavar: field.metavar }
+            : {}),
+        }),
+      );
     }
 
     if (rawArgsCount > 1) {
-      issues.push({ code: "INVALID_INPUT_GRAMMAR", commandId, message: `${commandId}: only one rawArgs field is supported` });
+      issues.push({
+        code: "INVALID_INPUT_GRAMMAR",
+        commandId,
+        message: `${commandId}: only one rawArgs field is supported`,
+      });
     }
 
-    compiled.push(Object.freeze({
-      id: commandId,
-      route: Object.freeze([...definition.route]) as readonly [string, ...string[]],
-      summary: definition.summary,
-      visibility: definition.visibility ?? "public",
-      ...(definition.description === undefined ? {} : { description: definition.description }),
-      ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
-      fields: Object.freeze(fields),
-      definition: snapshotCommandDefinition(definition),
-    }));
+    compiled.push(
+      Object.freeze({
+        id: commandId,
+        route: Object.freeze([...definition.route]) as readonly [string, ...string[]],
+        summary: definition.summary,
+        visibility: definition.visibility ?? "public",
+        ...(definition.description === undefined ? {} : { description: definition.description }),
+        ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
+        fields: Object.freeze(fields),
+        definition: snapshotCommandDefinition(definition),
+      }),
+    );
   }
 
   if (issues.length > 0) throw new CanonConstructionError(issues);
 
-  const skills = compileSkills(input.skills ?? {} as Skills, compiled);
-  const paths = compilePaths(input.paths ?? {} as Paths);
+  const skills = compileSkills(input.skills ?? ({} as Skills), compiled);
+  const paths = compilePaths(input.paths ?? ({} as Paths));
   const handlers = snapshotHandlers(input.handlers);
 
   const product = Object.freeze({

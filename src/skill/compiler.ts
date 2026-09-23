@@ -1,8 +1,5 @@
 import type { CompiledCommand } from "../command/compiler.js";
-import {
-  InvocationProjectionError,
-  validateInvocationBindings,
-} from "../projection/invocation.js";
+import { InvocationProjectionError, validateInvocationBindings } from "../projection/invocation.js";
 import {
   DEFAULT_SKILL_OUTPUT_BUDGET_BYTES,
   MIN_SKILL_OUTPUT_BUDGET_BYTES,
@@ -31,9 +28,7 @@ export interface CompiledDelegateSkillStep<Id extends string = string> {
 }
 
 export type CompiledSkillStep<CommandId extends string = string, Id extends string = string> =
-  | CompiledProseSkillStep
-  | CompiledCommandSkillStep<CommandId>
-  | CompiledDelegateSkillStep<Id>;
+  CompiledProseSkillStep | CompiledCommandSkillStep<CommandId> | CompiledDelegateSkillStep<Id>;
 
 export interface CompiledDomainResultReference {
   readonly kind: "domain-result";
@@ -66,12 +61,11 @@ export type CompiledSkills<Catalog extends SkillCatalog> = readonly CompiledSkil
 >[];
 
 function snapshotBindings(value: Readonly<Record<string, unknown>> | undefined): Readonly<Record<string, unknown>> {
-  return Object.freeze(Object.fromEntries(
-    Object.entries(value ?? {}).map(([key, item]) => [
-      key,
-      Array.isArray(item) ? Object.freeze([...item]) : item,
-    ]),
-  ));
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(value ?? {}).map(([key, item]) => [key, Array.isArray(item) ? Object.freeze([...item]) : item]),
+    ),
+  );
 }
 
 /** Validate Skill command/delegation references, bindings, and output policy against compiled Canon. */
@@ -87,10 +81,10 @@ export function compileSkills<const Catalog extends SkillCatalog>(
 
   for (const [skillId, definition] of Object.entries(catalog)) {
     const declaredBudget = definition.outputBudgetBytes ?? DEFAULT_SKILL_OUTPUT_BUDGET_BYTES;
-    const outputBudgetBytes = Number.isSafeInteger(declaredBudget)
-      && declaredBudget >= MIN_SKILL_OUTPUT_BUDGET_BYTES
-      ? declaredBudget
-      : DEFAULT_SKILL_OUTPUT_BUDGET_BYTES;
+    const outputBudgetBytes =
+      Number.isSafeInteger(declaredBudget) && declaredBudget >= MIN_SKILL_OUTPUT_BUDGET_BYTES
+        ? declaredBudget
+        : DEFAULT_SKILL_OUTPUT_BUDGET_BYTES;
     if (outputBudgetBytes !== declaredBudget) {
       issues.push({
         code: "INVALID_SKILL_OUTPUT_BUDGET",
@@ -118,11 +112,13 @@ export function compileSkills<const Catalog extends SkillCatalog>(
         } else {
           delegateIds.push(step.skillId);
         }
-        steps.push(Object.freeze({
-          kind: "delegate",
-          skillId: step.skillId,
-          ...(step.guidance === undefined ? {} : { guidance: step.guidance }),
-        }));
+        steps.push(
+          Object.freeze({
+            kind: "delegate",
+            skillId: step.skillId,
+            ...(step.guidance === undefined ? {} : { guidance: step.guidance }),
+          }),
+        );
         continue;
       }
 
@@ -160,27 +156,35 @@ export function compileSkills<const Catalog extends SkillCatalog>(
           }
         }
       }
-      steps.push(Object.freeze({
-        kind: "command",
-        commandId: step.commandId,
-        guidance: step.guidance,
-        prerequisites: Object.freeze([...(step.prerequisites ?? [])]),
-        bindings: snapshotBindings(step.bindings),
-      }));
+      steps.push(
+        Object.freeze({
+          kind: "command",
+          commandId: step.commandId,
+          guidance: step.guidance,
+          prerequisites: Object.freeze([...(step.prerequisites ?? [])]),
+          bindings: snapshotBindings(step.bindings),
+        }),
+      );
     }
     delegates.set(skillId, delegateIds);
-    compiled.push(Object.freeze({
-      id: skillId,
-      summary: definition.summary,
-      ...(definition.intent === undefined ? {} : { intent: definition.intent }),
-      invariants: Object.freeze([...(definition.invariants ?? [])]),
-      references: Object.freeze((definition.references ?? []).map((reference) => Object.freeze({
-        kind: "domain-result" as const,
-        id: reference.id,
-      }))),
-      outputBudgetBytes,
-      steps: Object.freeze(steps),
-    }));
+    compiled.push(
+      Object.freeze({
+        id: skillId,
+        summary: definition.summary,
+        ...(definition.intent === undefined ? {} : { intent: definition.intent }),
+        invariants: Object.freeze([...(definition.invariants ?? [])]),
+        references: Object.freeze(
+          (definition.references ?? []).map((reference) =>
+            Object.freeze({
+              kind: "domain-result" as const,
+              id: reference.id,
+            }),
+          ),
+        ),
+        outputBudgetBytes,
+        steps: Object.freeze(steps),
+      }),
+    );
   }
 
   const visited = new Set<string>();

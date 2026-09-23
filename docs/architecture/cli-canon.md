@@ -25,12 +25,12 @@ npmのscoped package名は先頭に`@`を付ける。GitHub repository名の`yoh
 
 各repositoryの`main` refを取得し、以下のcommitへ固定して関連コードを読んだ。以後の`main`更新を本書の観測結果へ暗黙に混ぜない。
 
-| 製品 | Repository | 分析commit |
-| --- | --- | --- |
-| Inari | `yohn-jp/gh-inari` | `e82dc3cf23dee09d491f145c2782cdede59523eb` |
-| Nawabari | `yohn-jp/nawabari` | `6b63542380fac428d1970f0303b93f700e9aa20c` |
-| Wabachi | `yohn-jp/wabachi` | `d30d322247431814ccc00c9d353cb84735258d9b` |
-| Suzukuri | `yohn-jp/suzukuri` | `94eaded74b26aa4dfb0c130687e0a99940ef8fb5` |
+| 製品      | Repository          | 分析commit                                 |
+| --------- | ------------------- | ------------------------------------------ |
+| Inari     | `yohn-jp/gh-inari`  | `e82dc3cf23dee09d491f145c2782cdede59523eb` |
+| Nawabari  | `yohn-jp/nawabari`  | `6b63542380fac428d1970f0303b93f700e9aa20c` |
+| Wabachi   | `yohn-jp/wabachi`   | `d30d322247431814ccc00c9d353cb84735258d9b` |
+| Suzukuri  | `yohn-jp/suzukuri`  | `94eaded74b26aa4dfb0c130687e0a99940ef8fb5` |
 | Mottainai | `yohn-jp/mottainai` | `63affbd23f84c6cd23bf82d6e82e376b3a545d55` |
 
 調査対象はcommand registry、CLI dispatch、Skill、path resolver、public manifest、package定義と関連テスト・package suiteである。全ファイルの完全監査、各製品のrelease可否判定、全テストの再実行ではない。観測した実装と、本書が新しく提案する規約を分けて記載する。
@@ -39,13 +39,13 @@ npmのscoped package名は先頭に`@`を付ける。GitHub repository名の`yoh
 
 ### 2.2 横断結果
 
-| 製品 | 採用する設計 | そのまま移植しない部分 |
-| --- | --- | --- |
-| Inari | commandがoption適用範囲を所有する。Skillがcommand IDとdomainの判断結果を参照する。契約identityをversion付きで公開する。 | `CommandId`/`OptionId`の手書きunion、全option共通の広いbindings型。repositoryで動的に決まるIssue契約をframeworkへ固定しない。 |
-| Nawabari | literalを保持したregistryからID型を導出する。parserの許可optionはregistryを直接読む。public manifestは既存authorityのprojectionと明示する。 | 手書きusage文字列。Git・claim・状態機械をCLI Canonへ移さない。生成Skill文書を、他製品と同じruntimeの`skill`コマンドだと扱わない。 |
-| Wabachi | command/optionの宣言とSkillのcommand参照を分離する。package検査で配布するdocs・Skill・binを確認する。 | helpの宣言とは別の手書きdispatch、option探索、version literal。Skillテキストの切り詰めを共通規約にはしない。 |
-| Suzukuri | structured Skillとcommand projectionの関係検証、UTF-8 byte budget超過時の拒否、CLI entryとlibrary entryの分離。 | `id: string`へ広げたcommand型、usage/example文字列、手書きdispatch。semantic projection engineそのものは移さない。 |
-| Mottainai | `SkillCliResult`がstream/output/exitCodeを明示する。state path resolverがenv/platformを受け取る。 | 手書きUSAGE、flag parser、Skillのcommand文字列、JSON文字列も対象にする切り詰め。no-argsでMCP serverを起動する既存契約は保持する。 |
+| 製品      | 採用する設計                                                                                                                                | そのまま移植しない部分                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Inari     | commandがoption適用範囲を所有する。Skillがcommand IDとdomainの判断結果を参照する。契約identityをversion付きで公開する。                     | `CommandId`/`OptionId`の手書きunion、全option共通の広いbindings型。repositoryで動的に決まるIssue契約をframeworkへ固定しない。     |
+| Nawabari  | literalを保持したregistryからID型を導出する。parserの許可optionはregistryを直接読む。public manifestは既存authorityのprojectionと明示する。 | 手書きusage文字列。Git・claim・状態機械をCLI Canonへ移さない。生成Skill文書を、他製品と同じruntimeの`skill`コマンドだと扱わない。 |
+| Wabachi   | command/optionの宣言とSkillのcommand参照を分離する。package検査で配布するdocs・Skill・binを確認する。                                       | helpの宣言とは別の手書きdispatch、option探索、version literal。Skillテキストの切り詰めを共通規約にはしない。                      |
+| Suzukuri  | structured Skillとcommand projectionの関係検証、UTF-8 byte budget超過時の拒否、CLI entryとlibrary entryの分離。                             | `id: string`へ広げたcommand型、usage/example文字列、手書きdispatch。semantic projection engineそのものは移さない。                |
+| Mottainai | `SkillCliResult`がstream/output/exitCodeを明示する。state path resolverがenv/platformを受け取る。                                           | 手書きUSAGE、flag parser、Skillのcommand文字列、JSON文字列も対象にする切り詰め。no-argsでMCP serverを起動する既存契約は保持する。 |
 
 根拠: Inari [I1][I2][I3]、Nawabari [Nw1][Nw2][Nw3][Nw4]、Wabachi [W1][W2][W3][W4]、Suzukuri [S1][S2][S3][S4][S5]、Mottainai [M1][M2][M3][M4]。
 
@@ -65,15 +65,15 @@ npmのscoped package名は先頭に`@`を付ける。GitHub repository名の`yoh
 
 ### 3.1 共通化する枠組み
 
-| Canon | 唯一のauthoring authority | 投射するもの |
-| --- | --- | --- |
-| Product identity | installed package metadataへの参照と製品の公開名 | version、bin identity、discovery header |
-| Command | command key、構文、input、handler binding | route、許可option、usage、help、command manifest |
-| Input | fieldごとの構文・presenceとvalue schema | typed handler input、runtime decoder、入力説明 |
-| Path | product-owned root/segment/parameter宣言 | runtime address、defaultの説明、fixture内address |
-| Skill | intent、command参照、手順、domain結果への参照 | index、scenario、text、JSON、配布文書 |
-| Output | surfaceごとのencoding/stream/budget/error mapping | 一貫したCLI response、bounded discovery |
-| Package/Fixture | 配布宣言への参照、scenario inputと独立した期待結果 | packed consumer検証、source/built/packageの共通harness |
+| Canon            | 唯一のauthoring authority                          | 投射するもの                                           |
+| ---------------- | -------------------------------------------------- | ------------------------------------------------------ |
+| Product identity | installed package metadataへの参照と製品の公開名   | version、bin identity、discovery header                |
+| Command          | command key、構文、input、handler binding          | route、許可option、usage、help、command manifest       |
+| Input            | fieldごとの構文・presenceとvalue schema            | typed handler input、runtime decoder、入力説明         |
+| Path             | product-owned root/segment/parameter宣言           | runtime address、defaultの説明、fixture内address       |
+| Skill            | intent、command参照、手順、domain結果への参照      | index、scenario、text、JSON、配布文書                  |
+| Output           | surfaceごとのencoding/stream/budget/error mapping  | 一貫したCLI response、bounded discovery                |
+| Package/Fixture  | 配布宣言への参照、scenario inputと独立した期待結果 | packed consumer検証、source/built/packageの共通harness |
 
 SoTの単位は「事実」である。例えばoptionの値域は既存domainのenumを参照し、framework用の同値enumを新設しない。package versionはpackage.jsonをauthorityとし、Product Modelに別のversion literalを要求しない。
 
@@ -89,12 +89,12 @@ orgのIssue/PR governance、共有Actions、release orchestrationは`yohn-jp/.gi
 
 ### 4.1 選択肢
 
-| 選択肢 | 借りられるもの | 残る自作部分・導入コスト | 判定 |
-| --- | --- | --- | --- |
-| TypeScriptのtableのみ | literal inference、mapped types | runtime decoder、parser、projection、参照検証を広く自作 | 不採用 |
-| Effect Schema + Effect CLI | schemaの型/encode/decode、typed CLI primitives、Effectでの実行 | Product Model、Path/Skillの関係、公開形式、既存構文の互換性は別途必要。schemaのみの利用も可能 | 有力な代替。初版の必須基盤にはしない |
-| Zod 4 + Commander | schema型/検証/JSON Schema、既存のCLI構文処理 | Product Modelとcompiler、command-specific型接続、関係検証は必要 | 推奨 |
-| Schema library + Node `util.parseArgs` | Node標準のoption解析とordered tokens | nested command、progressive help、optional-value等の構文層をさらに実装する必要 | より狭いCLIには適するが今回は既定にしない |
+| 選択肢                                 | 借りられるもの                                                 | 残る自作部分・導入コスト                                                                      | 判定                                      |
+| -------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| TypeScriptのtableのみ                  | literal inference、mapped types                                | runtime decoder、parser、projection、参照検証を広く自作                                       | 不採用                                    |
+| Effect Schema + Effect CLI             | schemaの型/encode/decode、typed CLI primitives、Effectでの実行 | Product Model、Path/Skillの関係、公開形式、既存構文の互換性は別途必要。schemaのみの利用も可能 | 有力な代替。初版の必須基盤にはしない      |
+| Zod 4 + Commander                      | schema型/検証/JSON Schema、既存のCLI構文処理                   | Product Modelとcompiler、command-specific型接続、関係検証は必要                               | 推奨                                      |
+| Schema library + Node `util.parseArgs` | Node標準のoption解析とordered tokens                           | nested command、progressive help、optional-value等の構文層をさらに実装する必要                | より狭いCLIには適するが今回は既定にしない |
 
 Effect Schemaは単一schemaから型・decode・encodeなどを得られる。Effect CLIにもtyped commandとhelp/usage/parse APIがある。したがって「Effectは全製品をEffectへ書き直さなければ使えない」は誤りである。一方、Effectを使うだけでcommandとSkillの参照整合性や認可の正しさまで保証されるわけでもない。[E1][E2]
 
@@ -161,30 +161,30 @@ fixture scenarios + independent expected results
 
 初期のpackageは一つとし、必要なimport境界をsubpathで分ける。
 
-| Import | 責務 |
-| --- | --- |
-| `@yohn-jp/cli-canon` | authoring型、compiler、純粋なhelp/Skill/manifest projection |
-| `@yohn-jp/cli-canon/node` | Commander接続、path context取得、CliIOとの接続 |
+| Import                       | 責務                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `@yohn-jp/cli-canon`         | authoring型、compiler、純粋なhelp/Skill/manifest projection                    |
+| `@yohn-jp/cli-canon/node`    | Commander接続、path context取得、CliIOとの接続                                 |
 | `@yohn-jp/cli-canon/testing` | scenario harness、packed consumer検証部品。製品のruntime entryからimportしない |
 
 root importで`process.argv`を読まない、commandを実行しない、signal handlerを登録しない、filesystem/networkへアクセスしない。Node adapterは明示的に起動する。testing依存が本番CLIのimport graphへ入らないことを検証する。複数npm packageへの先行分割はしない。
 
 ## 6. 不変条件と保証段階
 
-| ID | 不変条件 | 主な検証段階 |
-| --- | --- | --- |
-| C01 | command/option/path/Skill identityは宣言から導出し、別の手書きunionを持たない | TypeScript、authoring API |
-| C02 | commandは自分のinputと実行bindingを所有する。実行可能commandにhandler欠落を許さない | TypeScript、compileProduct |
-| C03 | 参照不能ID、alias衝突、曖昧な構文、path参照cycleを拒否する | compileProduct |
-| C04 | parser、usage、help、Skill内invocationは同じCompiledProductから構築する | compiler構造、projection tests |
-| C05 | 外部入力はunknownとしてdecodeしてからhandlerへ渡す | invocation boundary |
-| C06 | domainのschema・認可・遷移を重複定義しない | import boundary、review、domain tests |
-| C07 | Pathはaddressであり権限ではない。解決はfilesystemを変更しない | API境界、runtime tests |
-| C08 | JSONと実行手順を黙って切らない。failureとexit outcomeを一致させる | renderer、byte boundary tests |
-| C09 | library importにCLI起動副作用を持たせない | source/built/packed consumer tests |
-| C10 | fixture inputの共有とexpected oracleの独立性を両立する | scenario authoring、contract tests |
-| C11 | productの既存公開契約をframework導入の都合で変更しない | frozen compatibility corpus |
-| C12 | 生成artifactは編集対象ではなく、同一宣言から再生成・差分検出する | generate/check、package tests |
+| ID  | 不変条件                                                                            | 主な検証段階                          |
+| --- | ----------------------------------------------------------------------------------- | ------------------------------------- |
+| C01 | command/option/path/Skill identityは宣言から導出し、別の手書きunionを持たない       | TypeScript、authoring API             |
+| C02 | commandは自分のinputと実行bindingを所有する。実行可能commandにhandler欠落を許さない | TypeScript、compileProduct            |
+| C03 | 参照不能ID、alias衝突、曖昧な構文、path参照cycleを拒否する                          | compileProduct                        |
+| C04 | parser、usage、help、Skill内invocationは同じCompiledProductから構築する             | compiler構造、projection tests        |
+| C05 | 外部入力はunknownとしてdecodeしてからhandlerへ渡す                                  | invocation boundary                   |
+| C06 | domainのschema・認可・遷移を重複定義しない                                          | import boundary、review、domain tests |
+| C07 | Pathはaddressであり権限ではない。解決はfilesystemを変更しない                       | API境界、runtime tests                |
+| C08 | JSONと実行手順を黙って切らない。failureとexit outcomeを一致させる                   | renderer、byte boundary tests         |
+| C09 | library importにCLI起動副作用を持たせない                                           | source/built/packed consumer tests    |
+| C10 | fixture inputの共有とexpected oracleの独立性を両立する                              | scenario authoring、contract tests    |
+| C11 | productの既存公開契約をframework導入の都合で変更しない                              | frozen compatibility corpus           |
+| C12 | 生成artifactは編集対象ではなく、同一宣言から再生成・差分検出する                    | generate/check、package tests         |
 
 TypeScriptだけで任意の構文非曖昧性、filesystem状態、descriptionの正しさ、handlerの意味を証明するとは言わない。型検査、構築時検査、実行時検査、独立した期待値による検証を重ねる。
 
@@ -347,15 +347,15 @@ frameworkのpackage gateは一度作ったtarballをisolated consumerへinstall�
 
 ### 12.1 型とruntimeの最小証明集合
 
-| 検証 | 必須の証明 |
-| --- | --- |
-| Type tests | ID typo、未登録Skill参照、handler過不足、command外option binding、result型不一致を拒否する。positive/negative両方を検証する。 |
-| Construction tests | JavaScript/unknown入力からの不正宣言、alias衝突、未解決参照、path cycle、曖昧grammarを拒否する。 |
-| CLI boundary tests | optionを先頭へ置く構文、equals、短縮alias、repeat、optional value、`--`、surplus positional、option風の値、順序付きgroupの契約を保持する。 |
-| Projection tests | root/leaf help、Skill、manifest、invocationの参照一致を確認し、独立した必須field・例も照合する。 |
-| Output tests | cap前後、Unicode、末尾改行、valid JSON、error/stream/exit整合性、secret非露出を確認する。 |
-| Path tests | platform/env/cwdの明示入力、override順序、root外lexical path、parameter不足、解決の無副作用を確認する。 |
-| Packed consumer tests | 配布tarballからの型解決、import無副作用、必要exports/assets、製品binの動作を確認する。 |
+| 検証                  | 必須の証明                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Type tests            | ID typo、未登録Skill参照、handler過不足、command外option binding、result型不一致を拒否する。positive/negative両方を検証する。              |
+| Construction tests    | JavaScript/unknown入力からの不正宣言、alias衝突、未解決参照、path cycle、曖昧grammarを拒否する。                                           |
+| CLI boundary tests    | optionを先頭へ置く構文、equals、短縮alias、repeat、optional value、`--`、surplus positional、option風の値、順序付きgroupの契約を保持する。 |
+| Projection tests      | root/leaf help、Skill、manifest、invocationの参照一致を確認し、独立した必須field・例も照合する。                                           |
+| Output tests          | cap前後、Unicode、末尾改行、valid JSON、error/stream/exit整合性、secret非露出を確認する。                                                  |
+| Path tests            | platform/env/cwdの明示入力、override順序、root外lexical path、parameter不足、解決の無副作用を確認する。                                    |
+| Packed consumer tests | 配布tarballからの型解決、import無副作用、必要exports/assets、製品binの動作を確認する。                                                     |
 
 これは「念のため」のテスト増殖ではなく、C01–C12と移行する公開契約を証明する集合である。巨大なcross-product全組合せではなく、共有primitiveごとの代表ケースと、consumerごとの実際の契約を選ぶ。
 

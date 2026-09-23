@@ -34,28 +34,33 @@ test("certification scenarios carry command, input, setup, and required lanes", 
     ["setup", "source", 2],
     ["run", "source", 2],
   ]);
-  assert.deepEqual(results, [{
-    scenarioId: "read contract",
-    commandId: "document.read",
-    laneId: "source",
-    actual: 4,
-  }]);
+  assert.deepEqual(results, [
+    {
+      scenarioId: "read contract",
+      commandId: "document.read",
+      laneId: "source",
+      actual: 4,
+    },
+  ]);
 });
 
 test("certification rejects a missing required lane", async () => {
   await assert.rejects(
-    () => certifyScenarios(
-      [{
-        id: "packed contract",
-        commandId: "document.read",
-        input: null,
-        expected: true,
-        requiredLanes: ["packed"],
-        run: () => true,
-      }],
-      [{ id: "source", context: {} }],
-      () => {},
-    ),
+    () =>
+      certifyScenarios(
+        [
+          {
+            id: "packed contract",
+            commandId: "document.read",
+            input: null,
+            expected: true,
+            requiredLanes: ["packed"],
+            run: () => true,
+          },
+        ],
+        [{ id: "source", context: {} }],
+        () => {},
+      ),
     /requires missing lane packed/,
   );
 });

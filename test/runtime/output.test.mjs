@@ -75,7 +75,10 @@ test("CliIO writes the outcome stream while preserving its exit and failure clas
 
   writeCliOutcome(success, io);
   writeCliOutcome(failure, io);
-  assert.deepEqual(writes, [["stdout", '{"ok":true}\n'], ["stderr", "DOMAIN_DENIED\n"]]);
+  assert.deepEqual(writes, [
+    ["stdout", '{"ok":true}\n'],
+    ["stderr", "DOMAIN_DENIED\n"],
+  ]);
   assert.deepEqual(toCliResult(failure), {
     exitCode: 7,
     stdout: "",
@@ -100,9 +103,13 @@ test("Node runner uses the typed optional product domain error adapter", async (
   });
   const product = compileProduct({ name: "fixture", commands, handlers });
   const domainErrorAdapter = {
-    is: (error) => typeof error === "object" && error !== null
-      && "code" in error && error.code === "DOCUMENT_LOCKED"
-      && "message" in error && typeof error.message === "string",
+    is: (error) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "DOCUMENT_LOCKED" &&
+      "message" in error &&
+      typeof error.message === "string",
     map: (error) => ({
       exitCode: 8,
       stream: "stderr",
@@ -181,7 +188,11 @@ test("Node runner applies the byte budget to the final response and preserves un
   const defectProduct = compileProduct({
     name: "fixture",
     commands,
-    handlers: bindHandlers(commands)({ "document.read": () => { throw new Error("defect"); } }),
+    handlers: bindHandlers(commands)({
+      "document.read": () => {
+        throw new Error("defect");
+      },
+    }),
   });
   const defect = await runNodeCli(defectProduct, ["read"]);
   assert.equal(defect.exitCode, 1);

@@ -6,23 +6,19 @@ import {
   type InvocationRequirement,
 } from "../projection/invocation.js";
 import type { CompiledSkillStep, CompiledSkills, SkillCommandId } from "./compiler.js";
-import {
-  MIN_SKILL_OUTPUT_BUDGET_BYTES,
-  type SkillCatalog,
-  type SkillId,
-} from "./model.js";
+import { MIN_SKILL_OUTPUT_BUDGET_BYTES, type SkillCatalog, type SkillId } from "./model.js";
 import type { JsonOutputPolicyOptions, OutputPolicyOptions } from "../output/model.js";
 import { OutputPolicyError } from "../output/errors.js";
 import { jsonOutput, textOutput } from "../output/policy.js";
 
-export interface SkillProjectionProduct<Skills extends SkillCatalog = SkillCatalog>
-  extends InvocationProjectionProduct {
+export interface SkillProjectionProduct<
+  Skills extends SkillCatalog = SkillCatalog,
+> extends InvocationProjectionProduct {
   readonly skills: CompiledSkills<Skills>;
 }
 
 export type SkillInvocationRequirement =
-  | InvocationRequirement
-  | { readonly kind: "prerequisite"; readonly text: string };
+  InvocationRequirement | { readonly kind: "prerequisite"; readonly text: string };
 
 export type ProjectedSkillStep<CommandId extends string = string, Id extends string = string> =
   | { readonly kind: "prose"; readonly text: string }
@@ -61,11 +57,12 @@ function projectedStep<StepCommandId extends string, Id extends string>(
   step: CompiledSkillStep<StepCommandId, Id>,
 ): ProjectedSkillStep<StepCommandId, Id> {
   if (step.kind === "prose") return { kind: "prose", text: step.text };
-  if (step.kind === "delegate") return {
-    kind: "delegate",
-    skillId: step.skillId,
-    ...(step.guidance === undefined ? {} : { guidance: step.guidance }),
-  };
+  if (step.kind === "delegate")
+    return {
+      kind: "delegate",
+      skillId: step.skillId,
+      ...(step.guidance === undefined ? {} : { guidance: step.guidance }),
+    };
 
   const command = product.commands.find((candidate) => String(candidate.id) === step.commandId);
   if (command === undefined) {
@@ -74,33 +71,33 @@ function projectedStep<StepCommandId extends string, Id extends string>(
 
   const usageLine = renderHelp(product, { kind: "command", commandId: command.id }).split("\n", 1)[0] ?? "";
   const usage = usageLine.startsWith("Usage: ") ? usageLine.slice("Usage: ".length) : usageLine;
-  const projectedInvocation = projectInvocation(
-    product,
-    String(command.id),
-    step.bindings,
+  const projectedInvocation = projectInvocation(product, String(command.id), step.bindings);
+  const prerequisiteRequirements = step.prerequisites.map((text) =>
+    Object.freeze({
+      kind: "prerequisite" as const,
+      text,
+    }),
   );
-  const prerequisiteRequirements = step.prerequisites.map((text) => Object.freeze({
-    kind: "prerequisite" as const,
-    text,
-  }));
-  const invocation = projectedInvocation.state === "ready" && prerequisiteRequirements.length === 0
-    ? {
-        state: "ready" as const,
-        commandId: step.commandId,
-        value: projectedInvocation.value,
-      }
-    : {
-        state: "requires-input" as const,
-        commandId: step.commandId,
-        executable: projectedInvocation.state === "ready"
-          ? projectedInvocation.value.executable
-          : projectedInvocation.executable,
-        route: Object.freeze([...command.route]),
-        requirements: Object.freeze([
-          ...(projectedInvocation.state === "requires-input" ? projectedInvocation.requirements : []),
-          ...prerequisiteRequirements,
-        ]),
-      };
+  const invocation =
+    projectedInvocation.state === "ready" && prerequisiteRequirements.length === 0
+      ? {
+          state: "ready" as const,
+          commandId: step.commandId,
+          value: projectedInvocation.value,
+        }
+      : {
+          state: "requires-input" as const,
+          commandId: step.commandId,
+          executable:
+            projectedInvocation.state === "ready"
+              ? projectedInvocation.value.executable
+              : projectedInvocation.executable,
+          route: Object.freeze([...command.route]),
+          requirements: Object.freeze([
+            ...(projectedInvocation.state === "requires-input" ? projectedInvocation.requirements : []),
+            ...prerequisiteRequirements,
+          ]),
+        };
   const route = Object.freeze([...command.route]);
   return {
     kind: "command",
@@ -114,9 +111,7 @@ function projectedStep<StepCommandId extends string, Id extends string>(
   };
 }
 
-export function projectSkill<
-  const Skills extends SkillCatalog,
->(
+export function projectSkill<const Skills extends SkillCatalog>(
   product: SkillProjectionProduct<Skills>,
   skillId: SkillId<Skills>,
 ): ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>> {
@@ -133,9 +128,9 @@ export function projectSkill<
   };
 }
 
-export function projectSkills<
-  const Skills extends SkillCatalog,
->(product: SkillProjectionProduct<Skills>): readonly ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>>[] {
+export function projectSkills<const Skills extends SkillCatalog>(
+  product: SkillProjectionProduct<Skills>,
+): readonly ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>>[] {
   return product.skills.map((skill) => projectSkill(product, skill.id));
 }
 
@@ -147,10 +142,7 @@ function requireOutput(output: ReturnType<typeof textOutput>): string {
   throw new Error(`unexpected Skill output failure: ${output.failureKind}`);
 }
 
-function skillOutputOptions(
-  skill: ProjectedSkill,
-  options: OutputPolicyOptions,
-): { readonly maxBytes: number } {
+function skillOutputOptions(skill: ProjectedSkill, options: OutputPolicyOptions): { readonly maxBytes: number } {
   const maxBytes = options.maxBytes ?? skill.outputBudgetBytes;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < MIN_SKILL_OUTPUT_BUDGET_BYTES) {
     throw new OutputPolicyError(
@@ -194,10 +186,7 @@ export function renderSkillText(skill: ProjectedSkill, options: OutputPolicyOpti
     }
     lines.push(`Help: ${step.help.commandId}`, "");
   }
-  return requireOutput(textOutput(
-    `${lines.join("\n").trimEnd()}\n`,
-    skillOutputOptions(skill, options),
-  ));
+  return requireOutput(textOutput(`${lines.join("\n").trimEnd()}\n`, skillOutputOptions(skill, options)));
 }
 
 export function renderSkillJson(skill: ProjectedSkill, options: JsonOutputPolicyOptions = {}): string {

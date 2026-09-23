@@ -31,20 +31,25 @@ export interface OptionConfig<
   readonly description?: string;
 }
 
-type ConfigBoolean<Config, Key extends string, Default extends boolean> =
-  Key extends keyof Config
-    ? Exclude<Config[Key & keyof Config], undefined> | (undefined extends Config[Key & keyof Config] ? Default : never)
-    : Default;
+type ConfigBoolean<Config, Key extends string, Default extends boolean> = Key extends keyof Config
+  ? Exclude<Config[Key & keyof Config], undefined> | (undefined extends Config[Key & keyof Config] ? Default : never)
+  : Default;
 
 type PositionalRequired<Config extends PositionalConfig> = ConfigBoolean<Config, "required", true>;
-type OptionRepeatable<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> = ConfigBoolean<Config, "repeatable", false>;
-type OptionRequired<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> = ConfigBoolean<Config, "required", false>;
-type OptionValue<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> = "valueArity" extends keyof Config
-  ? Exclude<Config["valueArity" & keyof Config], undefined> | (undefined extends Config["valueArity" & keyof Config] ? "required" : never)
-  : "required";
-type OptionLookingValue<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> = "optionLookingValuePolicy" extends keyof Config
-  ? Exclude<Config["optionLookingValuePolicy" & keyof Config], undefined> | (undefined extends Config["optionLookingValuePolicy" & keyof Config] ? "consume" : never)
-  : "consume";
+type OptionRepeatable<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> =
+  ConfigBoolean<Config, "repeatable", false>;
+type OptionRequired<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> =
+  ConfigBoolean<Config, "required", false>;
+type OptionValue<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> =
+  "valueArity" extends keyof Config
+    ? | Exclude<Config["valueArity" & keyof Config], undefined>
+      | (undefined extends Config["valueArity" & keyof Config] ? "required" : never)
+    : "required";
+type OptionLookingValue<Config extends OptionConfig<boolean, boolean, OptionValueArity, OptionLookingValuePolicy>> =
+  "optionLookingValuePolicy" extends keyof Config
+    ? | Exclude<Config["optionLookingValuePolicy" & keyof Config], undefined>
+      | (undefined extends Config["optionLookingValuePolicy" & keyof Config] ? "consume" : never)
+    : "consume";
 
 export interface FlagConfig {
   readonly aliases?: readonly string[];
@@ -61,10 +66,7 @@ export function positional<const Schema extends z.ZodType, const Config extends 
   schema: Schema,
   config: Config,
 ): PositionalField<Schema, PositionalRequired<Config>>;
-export function positional(
-  schema: z.ZodType,
-  config: PositionalConfig = {},
-): PositionalField<z.ZodType, boolean> {
+export function positional(schema: z.ZodType, config: PositionalConfig = {}): PositionalField<z.ZodType, boolean> {
   return Object.freeze({
     kind: "positional",
     schema,
@@ -84,7 +86,13 @@ export function option<const Schema extends z.ZodType, const Config extends Cano
   flag: `--${string}`,
   schema: Schema,
   config: Config,
-): OptionField<Schema, OptionRepeatable<Config>, OptionRequired<Config>, OptionValue<Config>, OptionLookingValue<Config>>;
+): OptionField<
+  Schema,
+  OptionRepeatable<Config>,
+  OptionRequired<Config>,
+  OptionValue<Config>,
+  OptionLookingValue<Config>
+>;
 export function option(
   flag: `--${string}`,
   schema: z.ZodType,

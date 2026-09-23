@@ -27,7 +27,9 @@ function failureResult(
   stream: "stdout" | "stderr" = "stderr",
 ): CliResult {
   const bounded = textOutput(output, outputPolicyOptions(maxOutputBytes));
-  return toCliResult(bounded.status === "success" ? cliFailure(failureKind, bounded.output, exitCode, stream) : bounded);
+  return toCliResult(
+    bounded.status === "success" ? cliFailure(failureKind, bounded.output, exitCode, stream) : bounded,
+  );
 }
 
 function camelcase(value: string): string {
@@ -110,8 +112,7 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
     if (field.kind === "positional") {
       const name = field.metavar ?? field.key;
       command.argument(field.required === false ? `[${name}]` : `<${name}>`);
-    }
-    else if (field.kind === "raw-args") command.argument("[args...]");
+    } else if (field.kind === "raw-args") command.argument("[args...]");
     else command.addOption(makeOption(field, field.placement !== "anywhere"));
   }
   command.allowExcessArguments(false);
@@ -152,7 +153,6 @@ function addAnywhereOptions<const Catalog extends CommandCatalog>(
     }
   }
 }
-
 
 type CanonHelpMode = "text" | "full" | "json";
 
@@ -207,9 +207,10 @@ function detectHelp<const Catalog extends CommandCatalog>(
     const hasInlineValue = token.includes("=");
     if (declaration?.kind === "option" && !hasInlineValue) {
       const next = argv[index + 1];
-      if (declaration.valueArity !== "optional" || (
-        next !== undefined && (!next.startsWith("-") || /^-\d/u.test(next))
-      )) {
+      if (
+        declaration.valueArity !== "optional" ||
+        (next !== undefined && (!next.startsWith("-") || /^-\d/u.test(next)))
+      ) {
         index += 1;
         continue;
       }
@@ -218,9 +219,7 @@ function detectHelp<const Catalog extends CommandCatalog>(
     routeWords.push(token);
   }
 
-  return detected === undefined
-    ? undefined
-    : { ...detected, routeWords: Object.freeze([...routeWords]) };
+  return detected === undefined ? undefined : { ...detected, routeWords: Object.freeze([...routeWords]) };
 }
 
 function routeCandidates<const Catalog extends CommandCatalog>(
@@ -233,8 +232,9 @@ function routeCandidates<const Catalog extends CommandCatalog>(
       candidates.set(route.join("\u0000"), route);
     }
   }
-  return [...candidates.values()].sort((left, right) =>
-    right.length - left.length || (left.join(" ") < right.join(" ") ? -1 : left.join(" ") > right.join(" ") ? 1 : 0),
+  return [...candidates.values()].sort(
+    (left, right) =>
+      right.length - left.length || (left.join(" ") < right.join(" ") ? -1 : left.join(" ") > right.join(" ") ? 1 : 0),
   );
 }
 
@@ -247,8 +247,10 @@ function helpRequest<const Catalog extends CommandCatalog>(
   for (let start = 0; start < words.length; start += 1) {
     for (const route of routes) {
       if (route.every((segment, offset) => words[start + offset] === segment)) {
-        const command = product.commands.find((candidate) =>
-          candidate.route.length === route.length && candidate.route.every((segment, index) => route[index] === segment),
+        const command = product.commands.find(
+          (candidate) =>
+            candidate.route.length === route.length &&
+            candidate.route.every((segment, index) => route[index] === segment),
         );
         return command === undefined
           ? { kind: "route", route, mode }
@@ -284,7 +286,12 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
     const request = helpRequest(product, detectedHelp.routeWords, selectedMode === "json" ? "text" : selectedMode);
     if (selectedMode === "json") {
       const route = helpDiscoveryRoute(product, request);
-      return toCliResult(jsonOutput(projectDiscovery(product, route === undefined ? {} : { route }), outputPolicyOptions(options.maxOutputBytes)));
+      return toCliResult(
+        jsonOutput(
+          projectDiscovery(product, route === undefined ? {} : { route }),
+          outputPolicyOptions(options.maxOutputBytes),
+        ),
+      );
     }
     return toCliResult(textOutput(renderHelp(product, request), outputPolicyOptions(options.maxOutputBytes)));
   }
@@ -345,19 +352,27 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
           const missingRequiredOption = compiled.fields.find((field) => {
             if (field.kind !== "option" || field.required !== true) return false;
             const value = raw[field.key];
-            return field.repeatable === true
-              ? !Array.isArray(value) || value.length === 0
-              : value === undefined;
+            return field.repeatable === true ? !Array.isArray(value) || value.length === 0 : value === undefined;
           });
           if (missingRequiredOption !== undefined) {
-            return failureResult("usage", `error: required option '${missingRequiredOption.flag}' not specified\n`, 2, options.maxOutputBytes);
+            return failureResult(
+              "usage",
+              `error: required option '${missingRequiredOption.flag}' not specified\n`,
+              2,
+              options.maxOutputBytes,
+            );
           }
 
           let decoded: Readonly<Record<string, unknown>>;
           try {
             decoded = await decodeInput(compiled, raw);
           } catch (error) {
-            return failureResult("validation", `INVALID_INPUT: ${error instanceof Error ? error.message : String(error)}\n`, 2, options.maxOutputBytes);
+            return failureResult(
+              "validation",
+              `INVALID_INPUT: ${error instanceof Error ? error.message : String(error)}\n`,
+              2,
+              options.maxOutputBytes,
+            );
           }
 
           const handler = product.handlers[compiled.id as keyof Catalog] as (
@@ -378,11 +393,21 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
           try {
             result = await compiled.definition.result.parseAsync(rawResult);
           } catch (error) {
-            return failureResult("handler-result", `INVALID_HANDLER_RESULT: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+            return failureResult(
+              "handler-result",
+              `INVALID_HANDLER_RESULT: ${error instanceof Error ? error.message : String(error)}\n`,
+              1,
+              options.maxOutputBytes,
+            );
           }
           return toCliResult(jsonOutput(result, outputPolicyOptions(options.maxOutputBytes)));
         } catch (error) {
-          return failureResult("unexpected", `UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+          return failureResult(
+            "unexpected",
+            `UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`,
+            1,
+            options.maxOutputBytes,
+          );
         }
       })();
       await invocation;
@@ -393,10 +418,16 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
     await program.parseAsync(["node", product.name, ...argv]);
   } catch (error) {
     if (error instanceof CommanderError) {
-      if (error.code === "commander.helpDisplayed") return toCliResult(textOutput(stdout, outputPolicyOptions(options.maxOutputBytes)));
+      if (error.code === "commander.helpDisplayed")
+        return toCliResult(textOutput(stdout, outputPolicyOptions(options.maxOutputBytes)));
       return failureResult("usage", stderr, error.exitCode === 0 ? 1 : error.exitCode, options.maxOutputBytes);
     }
-    return failureResult("unexpected", `${stderr}UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+    return failureResult(
+      "unexpected",
+      `${stderr}UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`,
+      1,
+      options.maxOutputBytes,
+    );
   }
 
   return invocation === undefined

@@ -61,12 +61,13 @@ interface ProductDomainError {
 }
 
 const domainErrorAdapter: DomainErrorAdapter<ProductDomainError> = {
-  is: (error): error is ProductDomainError => typeof error === "object"
-    && error !== null
-    && "code" in error
-    && error.code === "DOCUMENT_LOCKED"
-    && "message" in error
-    && typeof error.message === "string",
+  is: (error): error is ProductDomainError =>
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "DOCUMENT_LOCKED" &&
+    "message" in error &&
+    typeof error.message === "string",
   map: (error) => ({ exitCode: 8, stream: "stderr", output: `${error.code}: ${error.message}\n` }),
 };
 void runNodeCli(compileProduct({ name: "fixture", commands, handlers }), [], { domainErrorAdapter });
@@ -82,7 +83,6 @@ const invalidDomainErrorAdapter: DomainErrorAdapter<ProductDomainError> = {
   map: () => ({ exitCode: "failure", stream: "stderr", output: "failed\n" }),
 };
 void invalidDomainErrorAdapter;
-
 
 bindHandlers(commands)({
   // @ts-expect-error result contract is checked per command.

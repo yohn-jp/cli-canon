@@ -106,8 +106,12 @@ test("Skill projection derives command metadata and preserves prose steps", () =
     value: { executable: "fixture", argv: ["document", "list"] },
   });
   assert.equal(projected.outputBudgetBytes, DEFAULT_SKILL_OUTPUT_BUDGET_BYTES);
-  assert.deepEqual(projectSkills(product).map((skill) => skill.id), ["document.review", "document.policy"]);
-  const expectedText = "Prepare a document for review.\n\nChoose the input document and output location.\n\nRender the chosen document.\nRun: fixture document render <file> --out <path> [--json]\nRequires input: file, out\nRequires prerequisites: The document is ready for review.\nHelp: document.render\n\nCheck the available documents.\nRun: fixture document list\nHelp: document.list\n";
+  assert.deepEqual(
+    projectSkills(product).map((skill) => skill.id),
+    ["document.review", "document.policy"],
+  );
+  const expectedText =
+    "Prepare a document for review.\n\nChoose the input document and output location.\n\nRender the chosen document.\nRun: fixture document render <file> --out <path> [--json]\nRequires input: file, out\nRequires prerequisites: The document is ready for review.\nHelp: document.render\n\nCheck the available documents.\nRun: fixture document list\nHelp: document.list\n";
   const text = renderSkillText(projected);
   assert.equal(text, expectedText);
   assert.equal(renderSkillText(projected), text);
@@ -157,20 +161,22 @@ test("bounded Skill text and JSON use the shared byte budget without truncation"
 test("Skill output budget defaults to 4096 and rejects invalid declared or selected budgets", () => {
   assert.equal(projectSkill(fixture(), "document.policy").outputBudgetBytes, 4096);
   assert.throws(
-    () => compileProduct({
-      name: "fixture",
-      commands: defineCommands({}),
-      handlers: {},
-      skills: defineSkills({
-        invalid: {
-          summary: "Invalid budget.",
-          outputBudgetBytes: MIN_SKILL_OUTPUT_BUDGET_BYTES - 1,
-          steps: [{ kind: "prose", text: "No." }],
-        },
+    () =>
+      compileProduct({
+        name: "fixture",
+        commands: defineCommands({}),
+        handlers: {},
+        skills: defineSkills({
+          invalid: {
+            summary: "Invalid budget.",
+            outputBudgetBytes: MIN_SKILL_OUTPUT_BUDGET_BYTES - 1,
+            steps: [{ kind: "prose", text: "No." }],
+          },
+        }),
       }),
-    }),
-    (error) => error instanceof SkillConstructionError
-      && error.issues.some((issue) => issue.code === "INVALID_SKILL_OUTPUT_BUDGET"),
+    (error) =>
+      error instanceof SkillConstructionError &&
+      error.issues.some((issue) => issue.code === "INVALID_SKILL_OUTPUT_BUDGET"),
   );
   const projected = projectSkill(fixture(), "document.policy");
   assert.throws(
@@ -264,40 +270,45 @@ test("Skill compilation rejects unknown delegation, cycles, and private commands
   const compileSkills = (skills) => compileProduct({ name: "fixture", commands, handlers, skills });
   assert.throws(
     () => compileSkills({ first: { summary: "A.", steps: [{ kind: "delegate", skillId: "missing" }] } }),
-    (error) => error instanceof SkillConstructionError
-      && error.issues.some((issue) => issue.code === "UNKNOWN_SKILL_REFERENCE"),
+    (error) =>
+      error instanceof SkillConstructionError && error.issues.some((issue) => issue.code === "UNKNOWN_SKILL_REFERENCE"),
   );
   assert.throws(
-    () => compileSkills({
-      first: { summary: "A.", steps: [{ kind: "delegate", skillId: "second" }] },
-      second: { summary: "B.", steps: [{ kind: "delegate", skillId: "first" }] },
-    }),
-    (error) => error instanceof SkillConstructionError
-      && error.issues.some((issue) => issue.code === "SKILL_DELEGATE_CYCLE"),
+    () =>
+      compileSkills({
+        first: { summary: "A.", steps: [{ kind: "delegate", skillId: "second" }] },
+        second: { summary: "B.", steps: [{ kind: "delegate", skillId: "first" }] },
+      }),
+    (error) =>
+      error instanceof SkillConstructionError && error.issues.some((issue) => issue.code === "SKILL_DELEGATE_CYCLE"),
   );
   assert.throws(
-    () => compileSkills({
-      first: { summary: "A.", steps: [{ kind: "command", commandId: "internal", guidance: "Run." }] },
-    }),
-    (error) => error instanceof SkillConstructionError
-      && error.issues.some((issue) => issue.code === "PRIVATE_COMMAND_REFERENCE"),
+    () =>
+      compileSkills({
+        first: { summary: "A.", steps: [{ kind: "command", commandId: "internal", guidance: "Run." }] },
+      }),
+    (error) =>
+      error instanceof SkillConstructionError &&
+      error.issues.some((issue) => issue.code === "PRIVATE_COMMAND_REFERENCE"),
   );
   assert.throws(
-    () => compileProduct({
-      name: "fixture",
-      commands: {
-        internal: {
-          route: ["internal"],
-          summary: "Internal command.",
-          visibility: "unknown",
-          input: {},
-          result: z.object({}),
+    () =>
+      compileProduct({
+        name: "fixture",
+        commands: {
+          internal: {
+            route: ["internal"],
+            summary: "Internal command.",
+            visibility: "unknown",
+            input: {},
+            result: z.object({}),
+          },
         },
-      },
-      handlers: { internal: () => ({}) },
-    }),
-    (error) => error instanceof CanonConstructionError
-      && error.issues.some((issue) => issue.code === "INVALID_COMMAND_VISIBILITY"),
+        handlers: { internal: () => ({}) },
+      }),
+    (error) =>
+      error instanceof CanonConstructionError &&
+      error.issues.some((issue) => issue.code === "INVALID_COMMAND_VISIBILITY"),
   );
 });
 
@@ -309,16 +320,18 @@ test("Skill compilation rejects unknown command references at construction", () 
     },
   };
   assert.throws(
-    () => compileProduct({
-      name: "fixture",
-      commands: defineCommands({
-        list: { route: ["list"], summary: "List.", input: {}, result: z.object({ count: z.number() }) },
+    () =>
+      compileProduct({
+        name: "fixture",
+        commands: defineCommands({
+          list: { route: ["list"], summary: "List.", input: {}, result: z.object({ count: z.number() }) },
+        }),
+        handlers: { list: () => ({ count: 0 }) },
+        skills: invalid,
       }),
-      handlers: { list: () => ({ count: 0 }) },
-      skills: invalid,
-    }),
-    (error) => error instanceof SkillConstructionError
-      && error.issues[0]?.code === "UNKNOWN_COMMAND_REFERENCE"
-      && error.issues[0]?.commandId === "document.missing",
+    (error) =>
+      error instanceof SkillConstructionError &&
+      error.issues[0]?.code === "UNKNOWN_COMMAND_REFERENCE" &&
+      error.issues[0]?.commandId === "document.missing",
   );
 });

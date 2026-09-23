@@ -46,7 +46,15 @@ function compareCommands(
 ): number {
   const leftRoute = left.route.join(" ");
   const rightRoute = right.route.join(" ");
-  return leftRoute < rightRoute ? -1 : leftRoute > rightRoute ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  return leftRoute < rightRoute
+    ? -1
+    : leftRoute > rightRoute
+      ? 1
+      : left.id < right.id
+        ? -1
+        : left.id > right.id
+          ? 1
+          : 0;
 }
 
 export function projectDiscovery(
@@ -54,10 +62,12 @@ export function projectDiscovery(
   request: DiscoveryRequest = {},
 ): ProductDiscovery {
   const commands = product.commands
-    .filter((command) => request.route === undefined || (
-      request.route.length <= command.route.length &&
-      request.route.every((segment, index) => command.route[index] === segment)
-    ))
+    .filter(
+      (command) =>
+        request.route === undefined ||
+        (request.route.length <= command.route.length &&
+          request.route.every((segment, index) => command.route[index] === segment)),
+    )
     .sort(compareCommands);
   return {
     name: product.name,
@@ -70,9 +80,10 @@ export function projectDiscovery(
             ...(product.packageMetadata.bin === undefined
               ? {}
               : {
-                  bin: typeof product.packageMetadata.bin === "string"
-                    ? product.packageMetadata.bin
-                    : { ...product.packageMetadata.bin },
+                  bin:
+                    typeof product.packageMetadata.bin === "string"
+                      ? product.packageMetadata.bin
+                      : { ...product.packageMetadata.bin },
                 }),
           },
         }),
