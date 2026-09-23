@@ -28,11 +28,7 @@ export function cliFailure(
   return { status: "failure", failureKind, stream, output, exitCode };
 }
 
-function boundedFailure(
-  failureKind: "serialization",
-  output: string,
-  options: OutputPolicyOptions,
-): CliOutcome {
+function boundedFailure(failureKind: "serialization", output: string, options: OutputPolicyOptions): CliOutcome {
   const maxBytes = options.maxBytes;
   if (maxBytes === undefined) return cliFailure(failureKind, output);
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
@@ -56,11 +52,7 @@ function boundedSuccess(output: string, options: OutputPolicyOptions): CliOutcom
 
   const detail = `OUTPUT_BUDGET_EXCEEDED: output uses ${bytes} UTF-8 bytes; limit is ${maxBytes} bytes.\n`;
   const brief = "OUTPUT_BUDGET_EXCEEDED\n";
-  const diagnostic = utf8ByteLength(detail) <= maxBytes
-    ? detail
-    : utf8ByteLength(brief) <= maxBytes
-      ? brief
-      : "";
+  const diagnostic = utf8ByteLength(detail) <= maxBytes ? detail : utf8ByteLength(brief) <= maxBytes ? brief : "";
   return cliFailure("budget", diagnostic);
 }
 
@@ -73,30 +65,18 @@ function strictJsonValue(key: string, value: unknown): unknown {
   if (typeof value === "number" && !Number.isFinite(value)) {
     throw new TypeError(`non-finite number at ${key || "<root>"}`);
   }
-  if (
-    value === undefined ||
-    typeof value === "bigint" ||
-    typeof value === "function" ||
-    typeof value === "symbol"
-  ) {
+  if (value === undefined || typeof value === "bigint" || typeof value === "function" || typeof value === "symbol") {
     throw new TypeError(`unsupported JSON value at ${key || "<root>"}: ${typeof value}`);
   }
   return value;
 }
 
 /** Serializes a complete JSON document without silent JSON coercions, appends its final newline, then applies the byte budget. */
-export function jsonOutput(
-  value: unknown,
-  options: JsonOutputPolicyOptions = {},
-): CliOutcome {
+export function jsonOutput(value: unknown, options: JsonOutputPolicyOptions = {}): CliOutcome {
   try {
     const json = JSON.stringify(value, strictJsonValue, options.space);
     if (json === undefined) {
-      return boundedFailure(
-        "serialization",
-        "OUTPUT_SERIALIZATION_FAILED: value is not JSON serializable.\n",
-        options,
-      );
+      return boundedFailure("serialization", "OUTPUT_SERIALIZATION_FAILED: value is not JSON serializable.\n", options);
     }
     return boundedSuccess(`${json}\n`, options);
   } catch (error) {

@@ -14,7 +14,6 @@ type NoExtraHandlers<Catalog extends CommandCatalog, Handlers> = Handlers &
   Record<Exclude<keyof Handlers, keyof Catalog>, never>;
 
 export function bindHandlers<const Catalog extends CommandCatalog>(_commands: Catalog) {
-  return <const Handlers extends HandlerMap<Catalog>>(
-    handlers: NoExtraHandlers<Catalog, Handlers>,
-  ): Handlers => handlers;
+  return <const Handlers extends HandlerMap<Catalog>>(handlers: NoExtraHandlers<Catalog, Handlers>): Handlers =>
+    handlers;
 }

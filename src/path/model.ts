@@ -1,9 +1,5 @@
 /** A root supplied by the consumer when paths are resolved. */
-export type PathRootSource =
-  | "cwd"
-  | "home"
-  | { readonly env: string }
-  | { readonly path: string };
+export type PathRootSource = "cwd" | "home" | { readonly env: string } | { readonly path: string };
 
 export type PathPlatform = "posix" | "win32";
 
@@ -69,7 +65,7 @@ type ParameterNamesFromSegments<Segments> = Segments extends readonly (infer Seg
 
 /** Required parameter names inferred from every path declaration. */
 export type PathParameterName<Catalog extends PathCatalog> = {
-  [Id in PathId<Catalog>]: ParameterNamesFromSegments<Catalog[Id]["segments"]>
+  [Id in PathId<Catalog>]: ParameterNamesFromSegments<Catalog[Id]["segments"]>;
 }[PathId<Catalog>];
 
 /** Required string values for the parameter names inferred from a catalog. */
@@ -91,9 +87,7 @@ export interface CompiledParentPath<Id extends string = string> {
   readonly kind: PathKind;
 }
 
-export type CompiledPath<Id extends string = string> =
-  | CompiledRootPath<Id>
-  | CompiledParentPath<Id>;
+export type CompiledPath<Id extends string = string> = CompiledRootPath<Id> | CompiledParentPath<Id>;
 
 /** Runtime declarations after relationship and lexical validation. */
 export interface CompiledPaths<Catalog extends PathCatalog = PathCatalog> {
@@ -111,6 +105,4 @@ export type PathResolutionContext<Names extends string = never> = {
   readonly env?: Readonly<Record<string, string | undefined>>;
 } & PathParameterContext<Names>;
 
-export type ResolvedPaths<Catalog extends PathCatalog> = Readonly<
-  { readonly [Id in PathId<Catalog>]: string }
->;
+export type ResolvedPaths<Catalog extends PathCatalog> = Readonly<{ readonly [Id in PathId<Catalog>]: string }>;

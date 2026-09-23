@@ -28,27 +28,15 @@ function run(command, args, options = {}) {
     ...options,
   });
   if (result.status !== 0) {
-    fail(
-      `${command} ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-    );
+    fail(`${command} ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
   }
   return result;
 }
 
 try {
-  writeFileSync(
-    path.join(root, "package.json"),
-    JSON.stringify({ private: true, type: "module" }, null, 2),
-  );
+  writeFileSync(path.join(root, "package.json"), JSON.stringify({ private: true, type: "module" }, null, 2));
 
-  run("npm", [
-    "install",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    `file:${tarball}`,
-    "zod@4.6.5",
-  ]);
+  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", `file:${tarball}`, "zod@4.6.5"]);
 
   const program = String.raw`
 import assert from "node:assert/strict";

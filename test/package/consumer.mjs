@@ -74,6 +74,9 @@ try {
   for (const filename of ["fixture-scenario.mjs", "fixture-oracle.mjs"]) {
     copyFileSync(path.join(testDirectory, "..", "runtime", filename), path.join(consumer, filename));
   }
+  for (const filename of ["failure.test.mjs", "passing.test.mjs"]) {
+    copyFileSync(path.join(testDirectory, "..", "fixtures", "node-test", filename), path.join(consumer, filename));
+  }
   copyFileSync(path.join(testDirectory, "root-import-purity.mjs"), path.join(consumer, "root-import-purity.mjs"));
 
   writeFileSync(
@@ -113,7 +116,13 @@ import {
   type NodeCliTerminalAdapter,
   type StructuredUsageErrorCode,
 } from "@yohn-jp/cli-canon/node";
-import { certifyScenarios, type CertificationScenario } from "@yohn-jp/cli-canon/testing";
+import {
+  certifyScenarios,
+  projectNodeTestTap,
+  type CertificationScenario,
+  type NodeTestTapCounts,
+  type NodeTestTapProjection,
+} from "@yohn-jp/cli-canon/testing";
 
 const commands = defineCommands({
   "example.echo": {
@@ -256,6 +265,26 @@ const typedScenario: CertificationScenario<{ multiplier: number }, number, { val
 void certifyScenarios([typedScenario], [{ id: "packed", context: { multiplier: 1 } }], (actual, expected) => {
   if (actual !== expected) throw new Error("scenario did not match its independent expectation");
 });
+const packedTapProjection: NodeTestTapProjection = projectNodeTestTap(
+  "TAP version 13\\n# tests 0\\n# suites 0\\n# pass 0\\n# fail 0\\n# cancelled 0\\n# skipped 0\\n# todo 0\\n",
+  0,
+);
+const tapCounts: NodeTestTapCounts = packedTapProjection.counts;
+const tapFailure = packedTapProjection.failures[0];
+packedTapProjection.status satisfies "passed" | "failed";
+packedTapProjection.exitCode satisfies number;
+tapCounts.tests satisfies number;
+tapFailure?.name satisfies string | undefined;
+tapFailure?.status satisfies "passed" | "failed" | "skipped" | "todo" | "cancelled" | undefined;
+tapFailure?.file satisfies string | undefined;
+tapFailure?.line satisfies number | undefined;
+tapFailure?.column satisfies number | undefined;
+tapFailure?.message satisfies string | undefined;
+tapFailure?.expected satisfies unknown;
+tapFailure?.actual satisfies unknown;
+tapFailure?.stack satisfies string | undefined;
+tapFailure?.diagnostics satisfies string | undefined;
+void packedTapProjection.failures;
 
 `,
   );
@@ -263,18 +292,73 @@ void certifyScenarios([typedScenario], [{ id: "packed", context: { multiplier: 1
   writeFileSync(
     path.join(consumer, "consumer.mjs"),
     `import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
 import * as api from "@yohn-jp/cli-canon";
 import * as node from "@yohn-jp/cli-canon/node";
 import packageMetadata from "./package.json" with { type: "json" };
-import { certifyScenarios } from "@yohn-jp/cli-canon/testing";
+import { certifyScenarios, projectNodeTestTap } from "@yohn-jp/cli-canon/testing";
 import { createCertificationScenario } from "./fixture-scenario.mjs";
 
 assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
+assert.equal("projectNodeTestTap" in api, false, "testing helpers must stay outside the runtime root entrypoint");
 await certifyScenarios(
   [createCertificationScenario(packageMetadata, ["packed"])],
   [{ id: "packed", context: { api, node } }],
   (actual, expected) => assert.deepEqual(actual, expected),
 );
+function runNodeTestFile(filename) {
+  const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", path.join(process.cwd(), filename)], {
+    encoding: "utf8",
+  });
+  assert.equal(result.error, undefined);
+  assert.notEqual(result.status, null);
+  return projectNodeTestTap(result.stdout, result.status ?? -1);
+}
+const packedFailure = runNodeTestFile("failure.test.mjs");
+assert.equal(packedFailure.status, "failed");
+assert.equal(packedFailure.exitCode, 1);
+assert.deepEqual(packedFailure.counts, {
+  tests: 1,
+  suites: 0,
+  pass: 0,
+  fail: 1,
+  cancelled: 0,
+  skipped: 0,
+  todo: 0,
+});
+assert.deepEqual(packedFailure.tests.map(({ name, status }) => ({ name, status })), [
+  { name: "projection preserves assertion diagnostics", status: "failed" },
+]);
+assert.equal(packedFailure.failures[0]?.name, "projection preserves assertion diagnostics");
+assert.equal(packedFailure.failures[0]?.status, "failed");
+assert.equal(packedFailure.failures[0]?.file, path.join(process.cwd(), "failure.test.mjs"));
+assert.equal(packedFailure.failures[0]?.line, 3);
+assert.equal(packedFailure.failures[0]?.column, 1);
+assert.match(packedFailure.failures[0]?.message, /Expected values to be strictly equal/u);
+assert.equal(packedFailure.failures[0]?.expected, "expected");
+assert.equal(packedFailure.failures[0]?.actual, "actual");
+assert.ok(packedFailure.failures[0]?.diagnostics?.includes("ERR_ASSERTION"));
+assert.match(packedFailure.failures[0]?.stack, /failure\.test\.mjs:3:/u);
+assert.ok(packedFailure.failures[0]?.diagnostics?.includes("expected: 'expected'"));
+assert.ok(packedFailure.failures[0]?.diagnostics?.includes("actual: 'actual'"));
+const packedPass = runNodeTestFile("passing.test.mjs");
+assert.equal(packedPass.status, "passed");
+assert.equal(packedPass.exitCode, 0);
+assert.deepEqual(packedPass.counts, {
+  tests: 2,
+  suites: 0,
+  pass: 2,
+  fail: 0,
+  cancelled: 0,
+  skipped: 0,
+  todo: 0,
+});
+assert.deepEqual(packedPass.tests.map(({ name, status }) => ({ name, status })), [
+  { name: "passes", status: "passed" },
+  { name: "also passes", status: "passed" },
+]);
+assert.deepEqual(packedPass.failures, []);
 const expectedJson = '{"message":"雪"}\\n';
 const jsonBytes = Buffer.byteLength(expectedJson, "utf8");
 const output = api.jsonOutput({ message: "雪" }, { maxBytes: jsonBytes });

@@ -5,9 +5,9 @@
 CLI Canon is pre-1.0 (`0.x`). There is no long-term support branch yet.
 Security fixes land on `main` and the latest `0.x` release.
 
-| Version | Supported |
-| --- | --- |
-| latest 0.x | Yes |
+| Version    | Supported |
+| ---------- | --------- |
+| latest 0.x | Yes       |
 
 ## Reporting a Vulnerability
 

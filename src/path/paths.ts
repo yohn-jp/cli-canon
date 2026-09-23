@@ -129,10 +129,7 @@ function validRootCandidate(candidate: unknown, pathId: string): PathIssue | und
     return validStaticSegments(candidate.segments, pathId);
   }
   if (Object.hasOwn(candidate, "default")) {
-    if (
-      keys.some((key) => !["default", "segments"].includes(key)) ||
-      !validRootSource(candidate.default)
-    ) {
+    if (keys.some((key) => !["default", "segments"].includes(key)) || !validRootSource(candidate.default)) {
       return issue("INVALID_PATH_ROOT", pathId, `${pathId}: invalid default root candidate`);
     }
     return validStaticSegments(candidate.segments, pathId);
@@ -170,7 +167,11 @@ function rootIssue(root: unknown, pathId: string): PathIssue {
     }
     return issue("INVALID_PATH_ROOT", pathId, `${pathId}: a default root candidate must be the final candidate`);
   }
-  return issue("INVALID_PATH_ROOT", pathId, `${pathId}: root must be cwd, home, an environment reference, an absolute path, or an ordered strategy`);
+  return issue(
+    "INVALID_PATH_ROOT",
+    pathId,
+    `${pathId}: root must be cwd, home, an environment reference, an absolute path, or an ordered strategy`,
+  );
 }
 
 function cloneRootSource(root: PathRootSource): PathRootSource {
@@ -203,9 +204,11 @@ function cloneRoot(root: PathRoot): PathRoot {
 }
 
 function compileSegments(segments: PathSegments | undefined): PathSegments {
-  return Object.freeze((segments ?? []).map((segment) =>
-    typeof segment === "string" ? segment : Object.freeze({ param: segment.param }),
-  ));
+  return Object.freeze(
+    (segments ?? []).map((segment) =>
+      typeof segment === "string" ? segment : Object.freeze({ param: segment.param }),
+    ),
+  );
 }
 
 function normalizePosixAbsolute(value: string): string | undefined {
@@ -299,7 +302,11 @@ export function compilePaths<const Catalog extends PathCatalog<Extract<keyof Cat
 
     const segmentIssue = validSegments(rawDeclaration.segments, id);
     if (segmentIssue !== undefined) issues.push(segmentIssue);
-    if (Object.hasOwn(rawDeclaration, "kind") && rawDeclaration.kind !== "file" && rawDeclaration.kind !== "directory") {
+    if (
+      Object.hasOwn(rawDeclaration, "kind") &&
+      rawDeclaration.kind !== "file" &&
+      rawDeclaration.kind !== "directory"
+    ) {
       issues.push(issue("INVALID_PATH_KIND", id, `${id}: kind must be file or directory`));
     }
 
@@ -492,7 +499,9 @@ type ExactParameterContext<Names extends string, Context> = Context extends { re
 /** Resolve addresses using only explicitly supplied context and lexical operations. */
 export function resolvePaths<
   const Catalog extends PathCatalog,
-  const Context extends PathResolutionContext<PathParameterName<Catalog>> = PathResolutionContext<PathParameterName<Catalog>>,
+  const Context extends PathResolutionContext<PathParameterName<Catalog>> = PathResolutionContext<
+    PathParameterName<Catalog>
+  >,
 >(
   paths: CompiledPaths<Catalog>,
   context: Context & ExactParameterContext<PathParameterName<Catalog>, Context>,
@@ -508,10 +517,18 @@ export function resolvePaths<
   for (const name of requiredParameters.keys()) {
     const value = Object.hasOwn(suppliedParameters, name) ? suppliedParameters[name] : undefined;
     if (value === undefined) {
-      throw contextIssue("MISSING_PATH_PARAMETER", `missing required path parameter ${name}`, requiredParameters.get(name));
+      throw contextIssue(
+        "MISSING_PATH_PARAMETER",
+        `missing required path parameter ${name}`,
+        requiredParameters.get(name),
+      );
     }
     if (typeof value !== "string") {
-      throw contextIssue("INVALID_PATH_PARAMETER", `path parameter ${name} must be a string`, requiredParameters.get(name));
+      throw contextIssue(
+        "INVALID_PATH_PARAMETER",
+        `path parameter ${name} must be a string`,
+        requiredParameters.get(name),
+      );
     }
     if (
       value.length === 0 ||

@@ -9,7 +9,8 @@ export const certificationOracle = {
     failureKind: "validation",
   },
   rootHelp: "Usage: fixture-cli <command>\n\nCommands:\n  echo\tEcho a message.\n\nHelp: --help[=full|json]\n",
-  commandHelp: "Usage: fixture-cli echo <message> [<suffix>] [--format[=<format>]]\n\nEcho a message.\n\nHelp: --help[=full|json]\n",
+  commandHelp:
+    "Usage: fixture-cli echo <message> [<suffix>] [--format[=<format>]]\n\nEcho a message.\n\nHelp: --help[=full|json]\n",
   fullHelp: {
     exitCode: 0,
     includesDescription: true,
@@ -55,7 +56,13 @@ export const certificationOracle = {
           description: "Write the supplied message and its optional annotations.",
           examples: ["fixture-cli echo hello --format=full"],
           fields: [
-            { key: "message", kind: "positional", required: true, description: "Message to write.", metavar: "message" },
+            {
+              key: "message",
+              kind: "positional",
+              required: true,
+              description: "Message to write.",
+              metavar: "message",
+            },
             { key: "suffix", kind: "positional", required: false, description: "Optional suffix." },
             {
               key: "format",
@@ -96,4 +103,3 @@ export function certificationOracleFor(packageMetadata) {
     },
   };
 }
-

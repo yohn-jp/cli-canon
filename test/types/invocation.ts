@@ -29,7 +29,7 @@ const commands = defineCommands({
   },
 });
 
-type Bindings = InvocationBindings<typeof commands["deploy.run"]>;
+type Bindings = InvocationBindings<(typeof commands)["deploy.run"]>;
 const bindings: Bindings = {
   target: "input",
   out: "out.html",

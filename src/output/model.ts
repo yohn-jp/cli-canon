@@ -1,11 +1,5 @@
 export type CliFailureKind =
-  | "usage"
-  | "validation"
-  | "domain"
-  | "handler-result"
-  | "serialization"
-  | "budget"
-  | "unexpected";
+  "usage" | "validation" | "domain" | "handler-result" | "serialization" | "budget" | "unexpected";
 
 export type CliStream = "stdout" | "stderr";
 

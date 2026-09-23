@@ -1,11 +1,8 @@
+export * from "./node-test-tap.js";
+
 export type CertificationLaneId = "source" | "built" | "packed";
 
-export interface CertificationScenario<
-  Context,
-  Expected,
-  Input = undefined,
-  CommandId extends string = string,
-> {
+export interface CertificationScenario<Context, Expected, Input = undefined, CommandId extends string = string> {
   readonly id: string;
   readonly commandId: CommandId;
   readonly input: Input;
@@ -37,12 +34,7 @@ export interface CertificationResult<Expected> extends CertificationLocation {
 }
 
 /** Run each independent scenario expectation against every lane the scenario declares as required. */
-export async function certifyScenarios<
-  Context,
-  Expected,
-  Input = undefined,
-  CommandId extends string = string,
->(
+export async function certifyScenarios<Context, Expected, Input = undefined, CommandId extends string = string>(
   scenarios: readonly CertificationScenario<Context, Expected, Input, CommandId>[],
   lanes: readonly CertificationLane<Context>[],
   assertExpected: CertificationAssertion<Expected>,

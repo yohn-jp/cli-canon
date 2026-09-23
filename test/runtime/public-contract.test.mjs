@@ -61,7 +61,8 @@ test("discovery projects only package name, version, and bin identity as JSON da
 test("invalid package identity fails product construction", () => {
   assert.throws(
     () => product({ name: "document-cli", version: "" }),
-    (error) => error instanceof CanonConstructionError &&
+    (error) =>
+      error instanceof CanonConstructionError &&
       error.issues.some((issue) => issue.code === "INVALID_PRODUCT_IDENTITY"),
   );
 });
@@ -97,14 +98,16 @@ test("declared complete schema projection is admitted during product constructio
   });
   const handlers = bindHandlers(commands)({ read: ({ value }) => ({ value }) });
   assert.throws(
-    () => compileProduct({
-      name: "fixture",
-      commands,
-      handlers,
-      schemaProjectionCompleteness: "complete",
-    }),
-    (error) => error instanceof CanonConstructionError
-      && error.issues.some((issue) => issue.code === "UNSUPPORTED_SCHEMA_PROJECTION"),
+    () =>
+      compileProduct({
+        name: "fixture",
+        commands,
+        handlers,
+        schemaProjectionCompleteness: "complete",
+      }),
+    (error) =>
+      error instanceof CanonConstructionError &&
+      error.issues.some((issue) => issue.code === "UNSUPPORTED_SCHEMA_PROJECTION"),
   );
 
   const structural = compileProduct({
@@ -134,8 +137,5 @@ test("schema projections label structural-only output and reject unsupported com
     () => projectSchema(refined, { io: "input", completeness: "complete" }),
     (error) => error instanceof SchemaProjectionError && error.code === "UNSUPPORTED_COMPLETE_SCHEMA_PROJECTION",
   );
-  assert.equal(
-    projectSchema(refined, { io: "input", completeness: "structural-only" }).schema.type,
-    "string",
-  );
+  assert.equal(projectSchema(refined, { io: "input", completeness: "structural-only" }).schema.type, "string");
 });
