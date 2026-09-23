@@ -1,5 +1,4 @@
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog } from "../command/model.js";
 
 export type HelpMode = "text" | "full";
 
@@ -8,9 +7,9 @@ export type HelpRequest =
   | { readonly kind: "route"; readonly route: readonly string[]; readonly mode?: HelpMode }
   | { readonly kind: "command"; readonly commandId: string; readonly mode?: HelpMode };
 
-export interface HelpProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
+export interface HelpProjectionProduct {
   readonly name: string;
-  readonly commands: CompiledProduct<Catalog>["commands"];
+  readonly commands: readonly CompiledCommand[];
 }
 
 function fieldSyntax(field: CompiledField): string {
@@ -37,8 +36,8 @@ function helpFooter(): string {
   return "Help: --help[=full|json]";
 }
 
-function sortedCommands<const Catalog extends CommandCatalog>(
-  product: HelpProjectionProduct<Catalog>,
+function sortedCommands(
+  product: HelpProjectionProduct,
 ): readonly CompiledCommand[] {
   return [...product.commands].sort((left, right) => {
     const leftRoute = left.route.join(" ");
@@ -82,8 +81,8 @@ function renderCommandHelp(command: CompiledCommand, productName: string, mode: 
   return lines.join("\n");
 }
 
-function routeChildren<const Catalog extends CommandCatalog>(
-  product: HelpProjectionProduct<Catalog>,
+function routeChildren(
+  product: HelpProjectionProduct,
   route: readonly string[],
 ): readonly { readonly segment: string; readonly command: CompiledCommand }[] {
   const children = new Map<string, CompiledCommand>();
@@ -95,8 +94,8 @@ function routeChildren<const Catalog extends CommandCatalog>(
   return [...children.entries()].map(([segment, command]) => ({ segment, command }));
 }
 
-function renderRouteHelp<const Catalog extends CommandCatalog>(
-  product: HelpProjectionProduct<Catalog>,
+function renderRouteHelp(
+  product: HelpProjectionProduct,
   route: readonly string[],
   mode: HelpMode,
 ): string {
@@ -114,8 +113,8 @@ function renderRouteHelp<const Catalog extends CommandCatalog>(
   return lines.join("\n");
 }
 
-function renderRootHelp<const Catalog extends CommandCatalog>(
-  product: HelpProjectionProduct<Catalog>,
+function renderRootHelp(
+  product: HelpProjectionProduct,
   mode: HelpMode,
 ): string {
   const lines = [`Usage: ${product.name} <command>`, "", "Commands:"];
@@ -127,8 +126,8 @@ function renderRootHelp<const Catalog extends CommandCatalog>(
   return lines.join("\n");
 }
 
-export function renderHelp<const Catalog extends CommandCatalog>(
-  product: HelpProjectionProduct<Catalog>,
+export function renderHelp(
+  product: HelpProjectionProduct,
   request: HelpRequest = { kind: "root" },
 ): string {
   const mode = request.mode ?? "text";
