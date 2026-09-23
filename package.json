@@ -1,6 +1,6 @@
 {
   "name": "@yohn-jp/cli-canon",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Internal canonical TypeScript framework for yohn-jp CLI products.",
   "type": "module",
   "main": "./dist/index.js",
@@ -26,7 +26,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/runtime/*.test.mjs",
+    "test": "pnpm run build && node --test test/runtime/*.test.mjs",
     "test:types": "tsc -p test/types/tsconfig.json --noEmit",
     "test:package": "node test/package/consumer.mjs",
     "format": "prettier --write .",
