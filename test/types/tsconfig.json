@@ -4,5 +4,5 @@
     "noEmit": true,
     "rootDir": "../.."
   },
-  "include": ["contracts.ts", "skill-contracts.ts", "path-canon.ts", "public-contract.ts", "../../src/**/*.ts"]
+  "include": ["contracts.ts", "skill-contracts.ts", "path-canon.ts", "public-contract.ts", "invocation.ts", "../../src/**/*.ts"]
 }

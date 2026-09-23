@@ -28,14 +28,17 @@ const commands = defineCommands({
 const handlers = bindHandlers(commands)({
   "fixture.read": ({ file }) => ({ contents: file }),
 });
-const compiled = compileProduct({ name: "fixture", packageMetadata, commands, handlers });
+const compiled = compileProduct({ name: "fixture", packageMetadata, commands, handlers, schemaProjectionCompleteness: "complete" });
 projectProductSchemas(compiled, "complete");
 
-const scenario: CertificationScenario<{ input: string }, number> = {
+const scenario: CertificationScenario<{ multiplier: number }, number, { value: string }, "fixture.read"> = {
   id: "typed scenario",
+  commandId: "fixture.read",
+  input: { value: "x" },
   expected: 1,
-  run: ({ input }) => input.length,
+  requiredLanes: ["source"],
+  run: ({ multiplier }, input) => input.value.length * multiplier,
 };
-void certifyScenarios([scenario], [{ id: "source", context: { input: "x" } }], (actual, expected) => {
+void certifyScenarios([scenario], [{ id: "source", context: { multiplier: 1 } }], (actual, expected) => {
   if (actual !== expected) throw new Error("unexpected scenario result");
 });

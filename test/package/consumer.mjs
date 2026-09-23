@@ -96,6 +96,7 @@ import {
   type PathId,
   type PathParameterName,
   projectProductSchemas,
+  projectInvocation,
   type ProductPackageIdentity,
   defineSkills,
   projectSkill,
@@ -130,9 +131,12 @@ const packageMetadata: ProductPackageIdentity = {
   version: "2.4.1",
   bin: { "fixture-cli": "./bin/fixture-cli.js" },
 };
-const product = compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers });
+const product = compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers, schemaProjectionCompleteness: "complete" });
 void projectProductSchemas(product, "complete");
 void runNodeCli(product, ["echo", "typed package", "--format=full"]);
+const invocation = projectInvocation(product, "example.echo", { message: "typed package", format: "full" });
+if (invocation.state !== "ready") throw new Error("packed invocation must be ready");
+invocation.value.argv satisfies readonly string[];
 const skills = defineSkills({
   setup: {
     summary: "Prepare the product.",
@@ -209,12 +213,15 @@ const io: CliIO = { writeStdout: (_output) => {}, writeStderr: (_output) => {} }
 const outcome: CliOutcome = jsonOutput({ ok: true }, { maxBytes: 64 });
 void io;
 void outcome;
-const typedScenario: CertificationScenario<{ value: string }, number> = {
+const typedScenario: CertificationScenario<{ multiplier: number }, number, { value: string }, "example.echo"> = {
   id: "typed certification",
+  commandId: "example.echo",
+  input: { value: "x" },
   expected: 1,
-  run: ({ value }) => value.length,
+  requiredLanes: ["packed"],
+  run: ({ multiplier }, input) => input.value.length * multiplier,
 };
-void certifyScenarios([typedScenario], [{ id: "packed", context: { value: "x" } }], (actual, expected) => {
+void certifyScenarios([typedScenario], [{ id: "packed", context: { multiplier: 1 } }], (actual, expected) => {
   if (actual !== expected) throw new Error("scenario did not match its independent expectation");
 });
 
@@ -232,7 +239,7 @@ import { createCertificationScenario } from "./fixture-scenario.mjs";
 
 assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
 await certifyScenarios(
-  [createCertificationScenario(packageMetadata)],
+  [createCertificationScenario(packageMetadata, ["packed"])],
   [{ id: "packed", context: { api, node } }],
   (actual, expected) => assert.deepEqual(actual, expected),
 );
@@ -258,6 +265,9 @@ api.writeCliOutcome(output, {
   writeStderr: (text) => writes.push(["stderr", text]),
 });
 assert.deepEqual(writes, [["stdout", expectedJson]]);
+const nonFinite = api.jsonOutput({ value: Number.NaN });
+assert.equal(nonFinite.status, "failure");
+assert.equal(nonFinite.failureKind, "serialization");
 const packedSkills = api.defineSkills({
   setup: {
     summary: "Prepare the product.",

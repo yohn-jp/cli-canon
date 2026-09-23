@@ -53,6 +53,16 @@ const fullHelp = await runNodeCli(product, ["document", "render", "--help=full"]
 const jsonHelp = await runNodeCli(product, ["--help=json"]);
 ```
 
+## Invocation Canon
+
+Executable invocation is a structured value, not a shell command string.
+`projectInvocation(product, commandId, bindings)` derives argv from the same
+Command Canon. A fully bound command returns `{ executable, argv }`; missing
+required bindings return `requires-input` and do not expose executable argv.
+
+Skill command bindings use the same projection. The `skillCommand(...)` helper
+types bindings from the referenced command declaration.
+
 Commander is private to the Node adapter. Zod schemas are the runtime validation
 authority for framework-owned values.
 
@@ -91,6 +101,7 @@ import packageMetadata from "./package.json" with { type: "json" };
 const product = compileProduct({
   name: "document-cli",
   packageMetadata,
+  schemaProjectionCompleteness: "complete",
   commands,
   handlers,
 });
@@ -101,15 +112,30 @@ optional `bin` fields under `packageMetadata`. `projectProductSchemas(product,
 "complete")` projects each field's Zod value schema and the output schema to
 JSON Schema. Command presence and cardinality remain in the discovery fields.
 Complete projection rejects Zod refinements or other schemas that cannot be
-represented fully. Use `"structural-only"` when the JSON Schema describes
-structure but cannot claim equivalent validation.
+represented fully. When `schemaProjectionCompleteness` is declared on
+`compileProduct`, that projection contract is admitted during construction.
+Use `"structural-only"` when the JSON Schema describes structure but cannot
+claim equivalent validation.
+
+Machine JSON output also fails explicitly for unsupported values and non-finite
+numbers instead of silently omitting them or serializing them as `null`.
+
+## Skill output budget
+
+Projected Skill text and JSON use the shared output policy and default to a
+4096-byte UTF-8 budget, including the final newline. Oversized output fails
+explicitly and is never truncated. A product may declare a larger
+`outputBudgetBytes`; values too small for the framework budget diagnostic are
+rejected.
 
 ## Certification helpers
 
-`@yohn-jp/cli-canon/testing` exports `certifyScenarios`. A scenario carries its
-independent expected result and can be run against the source, built, and packed
-lanes. Keep the expectation separate from the production projector being
-certified. This subpath is not imported by the root or Node runtime entries.
+`@yohn-jp/cli-canon/testing` exports `certifyScenarios`. A reusable scenario
+carries a stable ID, target command ID, explicit input, independent expected
+result, required execution lanes, and optional setup. The same scenario can run
+against source, built, and packed lanes while its expectation remains separate
+from the production projector. This subpath is not imported by the root or Node
+runtime entries.
 
 ## Architecture references
 

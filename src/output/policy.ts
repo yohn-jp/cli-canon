@@ -69,13 +69,28 @@ export function textOutput(output: string, options: OutputPolicyOptions = {}): C
   return boundedSuccess(output, options);
 }
 
-/** Serializes a complete JSON document, appends its final newline, then applies the byte budget. */
+function strictJsonValue(key: string, value: unknown): unknown {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new TypeError(`non-finite number at ${key || "<root>"}`);
+  }
+  if (
+    value === undefined ||
+    typeof value === "bigint" ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    throw new TypeError(`unsupported JSON value at ${key || "<root>"}: ${typeof value}`);
+  }
+  return value;
+}
+
+/** Serializes a complete JSON document without silent JSON coercions, appends its final newline, then applies the byte budget. */
 export function jsonOutput(
   value: unknown,
   options: JsonOutputPolicyOptions = {},
 ): CliOutcome {
   try {
-    const json = JSON.stringify(value, null, options.space);
+    const json = JSON.stringify(value, strictJsonValue, options.space);
     if (json === undefined) {
       return boundedFailure(
         "serialization",

@@ -1,5 +1,5 @@
-import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog } from "../command/model.js";
+import type { CompiledField } from "../command/compiler.js";
+import type { ProjectionCommandSource, ProjectionProductSource } from "./source.js";
 
 export type HelpMode = "text" | "full";
 
@@ -7,6 +7,8 @@ export type HelpRequest =
   | { readonly kind: "root"; readonly mode?: HelpMode }
   | { readonly kind: "route"; readonly route: readonly string[]; readonly mode?: HelpMode }
   | { readonly kind: "command"; readonly commandId: string; readonly mode?: HelpMode };
+
+export interface HelpProjectionProduct extends ProjectionProductSource {}
 
 function fieldSyntax(field: CompiledField): string {
   if (field.kind === "flag") return `[${[...(field.aliases ?? []), field.flag].join(", ")}]`;
@@ -24,7 +26,7 @@ function fieldSyntax(field: CompiledField): string {
   return "[-- <args...>]";
 }
 
-function commandUsage(productName: string, command: CompiledCommand): string {
+function commandUsage(productName: string, command: ProjectionCommandSource): string {
   return [productName, ...command.route, ...command.fields.map(fieldSyntax)].join(" ");
 }
 
@@ -32,9 +34,9 @@ function helpFooter(): string {
   return "Help: --help[=full|json]";
 }
 
-function sortedCommands<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
-): readonly CompiledCommand[] {
+function sortedCommands(
+  product: HelpProjectionProduct,
+): readonly ProjectionCommandSource[] {
   return [...product.commands].sort((left, right) => {
     const leftRoute = left.route.join(" ");
     const rightRoute = right.route.join(" ");
@@ -42,7 +44,7 @@ function sortedCommands<const Catalog extends CommandCatalog>(
   });
 }
 
-function renderFields(command: CompiledCommand): string[] {
+function renderFields(command: ProjectionCommandSource): string[] {
   const positionals = command.fields.filter((field) => field.kind === "positional" || field.kind === "raw-args");
   const options = command.fields.filter((field) => field.kind === "option" || field.kind === "flag");
   const lines: string[] = [];
@@ -63,7 +65,7 @@ function renderFields(command: CompiledCommand): string[] {
   return lines;
 }
 
-function renderCommandHelp(command: CompiledCommand, productName: string, mode: HelpMode): string {
+function renderCommandHelp(command: ProjectionCommandSource, productName: string, mode: HelpMode): string {
   const lines = [`Usage: ${commandUsage(productName, command)}`, "", command.summary];
   if (mode === "full") {
     if (command.description !== undefined) lines.push("", command.description);
@@ -77,11 +79,11 @@ function renderCommandHelp(command: CompiledCommand, productName: string, mode: 
   return lines.join("\n");
 }
 
-function routeChildren<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+function routeChildren(
+  product: HelpProjectionProduct,
   route: readonly string[],
-): readonly { readonly segment: string; readonly command: CompiledCommand }[] {
-  const children = new Map<string, CompiledCommand>();
+): readonly { readonly segment: string; readonly command: ProjectionCommandSource }[] {
+  const children = new Map<string, ProjectionCommandSource>();
   for (const command of sortedCommands(product)) {
     if (route.length >= command.route.length || !route.every((segment, index) => command.route[index] === segment)) continue;
     const segment = command.route[route.length];
@@ -90,8 +92,8 @@ function routeChildren<const Catalog extends CommandCatalog>(
   return [...children.entries()].map(([segment, command]) => ({ segment, command }));
 }
 
-function renderRouteHelp<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+function renderRouteHelp(
+  product: HelpProjectionProduct,
   route: readonly string[],
   mode: HelpMode,
 ): string {
@@ -109,8 +111,8 @@ function renderRouteHelp<const Catalog extends CommandCatalog>(
   return lines.join("\n");
 }
 
-function renderRootHelp<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+function renderRootHelp(
+  product: HelpProjectionProduct,
   mode: HelpMode,
 ): string {
   const lines = [`Usage: ${product.name} <command>`, "", "Commands:"];
@@ -122,8 +124,8 @@ function renderRootHelp<const Catalog extends CommandCatalog>(
   return lines.join("\n");
 }
 
-export function renderHelp<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+export function renderHelp(
+  product: HelpProjectionProduct,
   request: HelpRequest = { kind: "root" },
 ): string {
   const mode = request.mode ?? "text";

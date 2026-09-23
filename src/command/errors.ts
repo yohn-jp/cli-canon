@@ -6,12 +6,15 @@ export type CanonConstructionErrorCode =
   | "INVALID_PRODUCT_IDENTITY"
   | "INVALID_HANDLER_BINDING"
   | "INVALID_COMMAND_VISIBILITY"
+  | "INVALID_PROJECTION"
+  | "UNSUPPORTED_SCHEMA_PROJECTION"
   | "INVALID_INPUT_GRAMMAR"
   | "UNSUPPORTED_GRAMMAR";
 
 export interface CanonConstructionIssue {
   readonly code: CanonConstructionErrorCode;
   readonly commandId?: string;
+  readonly skillId?: string;
   readonly field?: string;
   readonly fields?: readonly string[];
   readonly message: string;

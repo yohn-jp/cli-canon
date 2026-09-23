@@ -1,18 +1,28 @@
-import type { CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog } from "../command/model.js";
 import { renderHelp } from "../projection/help.js";
+import {
+  projectInvocation,
+  type CliInvocation,
+  type InvocationProjectionProduct,
+  type InvocationRequirement,
+} from "../projection/invocation.js";
 import type { CompiledSkillStep, CompiledSkills, SkillCommandId } from "./compiler.js";
-import type { SkillCatalog, SkillId } from "./model.js";
+import {
+  MIN_SKILL_OUTPUT_BUDGET_BYTES,
+  type SkillCatalog,
+  type SkillId,
+} from "./model.js";
 import type { JsonOutputPolicyOptions, OutputPolicyOptions } from "../output/model.js";
 import { OutputPolicyError } from "../output/errors.js";
 import { jsonOutput, textOutput } from "../output/policy.js";
 
-export interface SkillProjectionProduct<
-  Catalog extends CommandCatalog,
-  Skills extends SkillCatalog,
-> extends CompiledProduct<Catalog> {
+export interface SkillProjectionProduct<Skills extends SkillCatalog = SkillCatalog>
+  extends InvocationProjectionProduct {
   readonly skills: CompiledSkills<Skills>;
 }
+
+export type SkillInvocationRequirement =
+  | InvocationRequirement
+  | { readonly kind: "prerequisite"; readonly text: string };
 
 export type ProjectedSkillStep<CommandId extends string = string, Id extends string = string> =
   | { readonly kind: "prose"; readonly text: string }
@@ -26,14 +36,13 @@ export type ProjectedSkillStep<CommandId extends string = string, Id extends str
       readonly usage: string;
       readonly help: { readonly commandId: CommandId };
       readonly invocation:
-        | { readonly state: "ready"; readonly route: readonly string[] }
+        | { readonly state: "ready"; readonly commandId: CommandId; readonly value: CliInvocation }
         | {
             readonly state: "requires-input";
+            readonly commandId: CommandId;
+            readonly executable: string;
             readonly route: readonly string[];
-            readonly requirements: readonly (
-              | { readonly kind: "field"; readonly name: string }
-              | { readonly kind: "prerequisite"; readonly text: string }
-            )[];
+            readonly requirements: readonly SkillInvocationRequirement[];
           };
     };
 
@@ -43,13 +52,14 @@ export interface ProjectedSkill<Id extends string = string, CommandId extends st
   readonly intent?: string;
   readonly invariants?: readonly string[];
   readonly references?: readonly { readonly kind: "domain-result"; readonly id: string }[];
+  readonly outputBudgetBytes: number;
   readonly steps: readonly ProjectedSkillStep<CommandId, Id>[];
 }
 
-function projectedStep<const Catalog extends CommandCatalog, CommandId extends string, Id extends string>(
-  product: CompiledProduct<Catalog>,
-  step: CompiledSkillStep<CommandId, Id>,
-): ProjectedSkillStep<CommandId, Id> {
+function projectedStep<StepCommandId extends string, Id extends string>(
+  product: InvocationProjectionProduct,
+  step: CompiledSkillStep<StepCommandId, Id>,
+): ProjectedSkillStep<StepCommandId, Id> {
   if (step.kind === "prose") return { kind: "prose", text: step.text };
   if (step.kind === "delegate") return {
     kind: "delegate",
@@ -64,33 +74,50 @@ function projectedStep<const Catalog extends CommandCatalog, CommandId extends s
 
   const usageLine = renderHelp(product, { kind: "command", commandId: command.id }).split("\n", 1)[0] ?? "";
   const usage = usageLine.startsWith("Usage: ") ? usageLine.slice("Usage: ".length) : usageLine;
-  const requirements = [
-    ...command.fields
-      .filter((field) => (field.kind === "positional" && field.required === true)
-        || (field.kind === "option" && field.required === true))
-      .map((field) => ({ kind: "field" as const, name: field.key })),
-    ...step.prerequisites.map((text) => ({ kind: "prerequisite" as const, text })),
-  ];
-  const route = [...command.route];
+  const projectedInvocation = projectInvocation(
+    product,
+    String(command.id),
+    step.bindings,
+  );
+  const prerequisiteRequirements = step.prerequisites.map((text) => Object.freeze({
+    kind: "prerequisite" as const,
+    text,
+  }));
+  const invocation = projectedInvocation.state === "ready" && prerequisiteRequirements.length === 0
+    ? {
+        state: "ready" as const,
+        commandId: step.commandId,
+        value: projectedInvocation.value,
+      }
+    : {
+        state: "requires-input" as const,
+        commandId: step.commandId,
+        executable: projectedInvocation.state === "ready"
+          ? projectedInvocation.value.executable
+          : projectedInvocation.executable,
+        route: Object.freeze([...command.route]),
+        requirements: Object.freeze([
+          ...(projectedInvocation.state === "requires-input" ? projectedInvocation.requirements : []),
+          ...prerequisiteRequirements,
+        ]),
+      };
+  const route = Object.freeze([...command.route]);
   return {
     kind: "command",
     commandId: step.commandId,
     guidance: step.guidance,
-    prerequisites: [...step.prerequisites],
+    prerequisites: Object.freeze([...step.prerequisites]),
     route,
     usage,
     help: { commandId: step.commandId },
-    invocation: requirements.length === 0
-      ? { state: "ready", route }
-      : { state: "requires-input", route, requirements },
+    invocation,
   };
 }
 
 export function projectSkill<
-  const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog,
 >(
-  product: SkillProjectionProduct<Catalog, Skills>,
+  product: SkillProjectionProduct<Skills>,
   skillId: SkillId<Skills>,
 ): ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>> {
   const skill = product.skills.find((candidate) => candidate.id === skillId);
@@ -101,14 +128,14 @@ export function projectSkill<
     ...(skill.intent === undefined ? {} : { intent: skill.intent }),
     ...(skill.invariants.length === 0 ? {} : { invariants: skill.invariants }),
     ...(skill.references.length === 0 ? {} : { references: skill.references }),
+    outputBudgetBytes: skill.outputBudgetBytes,
     steps: skill.steps.map((step) => projectedStep(product, step)),
   };
 }
 
 export function projectSkills<
-  const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog,
->(product: SkillProjectionProduct<Catalog, Skills>): readonly ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>>[] {
+>(product: SkillProjectionProduct<Skills>): readonly ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>>[] {
   return product.skills.map((skill) => projectSkill(product, skill.id));
 }
 
@@ -118,6 +145,20 @@ function requireOutput(output: ReturnType<typeof textOutput>): string {
     throw new OutputPolicyError(output.failureKind, output.output.trimEnd() || output.failureKind);
   }
   throw new Error(`unexpected Skill output failure: ${output.failureKind}`);
+}
+
+function skillOutputOptions(
+  skill: ProjectedSkill,
+  options: OutputPolicyOptions,
+): { readonly maxBytes: number } {
+  const maxBytes = options.maxBytes ?? skill.outputBudgetBytes;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < MIN_SKILL_OUTPUT_BUDGET_BYTES) {
+    throw new OutputPolicyError(
+      "budget",
+      `OUTPUT_BUDGET_INVALID: Skill maxBytes must be a safe integer >= ${MIN_SKILL_OUTPUT_BUDGET_BYTES}`,
+    );
+  }
+  return { maxBytes };
 }
 
 export function renderSkillText(skill: ProjectedSkill, options: OutputPolicyOptions = {}): string {
@@ -153,12 +194,16 @@ export function renderSkillText(skill: ProjectedSkill, options: OutputPolicyOpti
     }
     lines.push(`Help: ${step.help.commandId}`, "");
   }
-  return requireOutput(textOutput(`${lines.join("\n").trimEnd()}\n`, options));
+  return requireOutput(textOutput(
+    `${lines.join("\n").trimEnd()}\n`,
+    skillOutputOptions(skill, options),
+  ));
 }
 
 export function renderSkillJson(skill: ProjectedSkill, options: JsonOutputPolicyOptions = {}): string {
-  const policy = options.space === undefined
-    ? { ...options, space: 2 }
-    : options;
+  const policy = {
+    ...skillOutputOptions(skill, options),
+    ...(options.space === undefined ? { space: 2 } : { space: options.space }),
+  };
   return requireOutput(jsonOutput(skill, policy));
 }

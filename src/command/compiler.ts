@@ -15,6 +15,14 @@ import type { SkillCatalog, SkillId } from "../skill/model.js";
 import { compilePaths } from "../path/paths.js";
 import type { CompiledPaths, PathCatalog } from "../path/model.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
+import { renderHelp } from "../projection/help.js";
+import { projectDiscovery } from "../projection/discovery.js";
+import {
+  projectProductSchemas,
+  SchemaProjectionError,
+  type SchemaProjectionCompleteness,
+} from "../projection/schema.js";
+import { projectSkills, renderSkillJson, renderSkillText } from "../skill/projection.js";
 
 export interface CompiledField {
   readonly key: string;
@@ -55,6 +63,8 @@ export interface CompileProductInput<
   readonly handlers: HandlerMap<Catalog>;
   /** Package.json metadata supplied by the product composition root. */
   readonly packageMetadata?: ProductPackageIdentity;
+  /** Declares a public schema contract that must be admitted during construction. */
+  readonly schemaProjectionCompleteness?: SchemaProjectionCompleteness;
   readonly skills?: Skills;
   readonly paths?: Paths;
 }
@@ -72,6 +82,7 @@ export interface CompiledProduct<
   >[];
   readonly handlers: HandlerMap<Catalog>;
   readonly packageMetadata?: ProductPackageIdentity;
+  readonly schemaProjectionCompleteness?: SchemaProjectionCompleteness;
   readonly skills: CompiledSkills<Skills>;
   readonly paths: CompiledPaths<Paths>;
 }
@@ -394,12 +405,64 @@ export function compileProduct<
   const paths = compilePaths(input.paths ?? {} as Paths);
   const handlers = snapshotHandlers(input.handlers);
 
-  return Object.freeze({
+  const product = Object.freeze({
     name: input.name,
     commands: Object.freeze(compiled) as CompiledProduct<Catalog>["commands"],
     handlers,
     ...(packageMetadata === undefined ? {} : { packageMetadata }),
+    ...(input.schemaProjectionCompleteness === undefined
+      ? {}
+      : { schemaProjectionCompleteness: input.schemaProjectionCompleteness }),
     skills,
     paths,
-  });
+  }) as CompiledProduct<Catalog, Skills, Paths>;
+
+  const projectionIssues: CanonConstructionIssue[] = [];
+  try {
+    renderHelp(product);
+    projectDiscovery(product);
+  } catch (error) {
+    projectionIssues.push({
+      code: "INVALID_PROJECTION",
+      message: `framework projection failed during construction: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+
+  try {
+    for (const skill of projectSkills(product)) {
+      try {
+        renderSkillText(skill);
+        renderSkillJson(skill);
+      } catch (error) {
+        projectionIssues.push({
+          code: "INVALID_PROJECTION",
+          skillId: skill.id,
+          message: `skill ${skill.id}: projection failed during construction: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+  } catch (error) {
+    projectionIssues.push({
+      code: "INVALID_PROJECTION",
+      message: `Skill projection failed during construction: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+
+  if (input.schemaProjectionCompleteness !== undefined) {
+    try {
+      projectProductSchemas(product, input.schemaProjectionCompleteness);
+    } catch (error) {
+      if (error instanceof SchemaProjectionError) {
+        projectionIssues.push({
+          code: "UNSUPPORTED_SCHEMA_PROJECTION",
+          message: error.message,
+        });
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  if (projectionIssues.length > 0) throw new CanonConstructionError(projectionIssues);
+  return product;
 }

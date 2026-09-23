@@ -91,7 +91,11 @@ function helpFixture() {
     },
   });
   const handlers = bindHandlers(commands)({
-    "document.inspect": ({ file, target, format }) => ({ file, target, format }),
+    "document.inspect": ({ file, target, format }) => ({
+      file,
+      ...(target === undefined ? {} : { target }),
+      ...(format === undefined ? {} : { format }),
+    }),
     "domain.list": () => ({}),
     "domain.show": () => ({}),
   });

@@ -9,6 +9,9 @@ import {
   flag,
   option,
   positional,
+  skillCommand,
+  DEFAULT_SKILL_OUTPUT_BUDGET_BYTES,
+  MIN_SKILL_OUTPUT_BUDGET_BYTES,
   OutputPolicyError,
   utf8ByteLength,
 } from "../../dist/index.js";
@@ -87,6 +90,8 @@ test("Skill projection derives command metadata and preserves prose steps", () =
     help: { commandId: "document.render" },
     invocation: {
       state: "requires-input",
+      commandId: "document.render",
+      executable: "fixture",
       route: ["document", "render"],
       requirements: [
         { kind: "field", name: "file" },
@@ -97,8 +102,10 @@ test("Skill projection derives command metadata and preserves prose steps", () =
   });
   assert.deepEqual(projected.steps[2].invocation, {
     state: "ready",
-    route: ["document", "list"],
+    commandId: "document.list",
+    value: { executable: "fixture", argv: ["document", "list"] },
   });
+  assert.equal(projected.outputBudgetBytes, DEFAULT_SKILL_OUTPUT_BUDGET_BYTES);
   assert.deepEqual(projectSkills(product).map((skill) => skill.id), ["document.review", "document.policy"]);
   const expectedText = "Prepare a document for review.\n\nChoose the input document and output location.\n\nRender the chosen document.\nRun: fixture document render <file> --out <path> [--json]\nRequires input: file, out\nRequires prerequisites: The document is ready for review.\nHelp: document.render\n\nCheck the available documents.\nRun: fixture document list\nHelp: document.list\n";
   const text = renderSkillText(projected);
@@ -106,16 +113,22 @@ test("Skill projection derives command metadata and preserves prose steps", () =
   assert.equal(renderSkillText(projected), text);
 });
 
-test("Skill JSON projection is deterministic, valid, and keeps long content intact", () => {
+test("Skill JSON default budget fails explicitly and an explicit larger budget preserves complete content", () => {
   const projected = projectSkill(fixture(), "document.policy");
   const longText = "policy ".repeat(20_000);
   const withLongContent = {
     ...projected,
     steps: [{ kind: "prose", text: longText }],
   };
-  const json = renderSkillJson(withLongContent);
+  assert.throws(
+    () => renderSkillJson(withLongContent),
+    (error) => error instanceof OutputPolicyError && error.failureKind === "budget",
+  );
+  const expected = `${JSON.stringify(withLongContent, null, 2)}\n`;
+  const maxBytes = Buffer.byteLength(expected, "utf8");
+  const json = renderSkillJson(withLongContent, { maxBytes });
+  assert.equal(json, expected);
   assert.deepEqual(JSON.parse(json), withLongContent);
-  assert.equal(renderSkillJson(withLongContent), json);
 });
 
 test("bounded Skill text and JSON use the shared byte budget without truncation", () => {
@@ -139,6 +152,67 @@ test("bounded Skill text and JSON use the shared byte budget without truncation"
     (error) => error instanceof OutputPolicyError && error.failureKind === "budget",
   );
   assert.ok(utf8ByteLength(boundedJson) <= jsonBytes);
+});
+
+test("Skill output budget defaults to 4096 and rejects invalid declared or selected budgets", () => {
+  assert.equal(projectSkill(fixture(), "document.policy").outputBudgetBytes, 4096);
+  assert.throws(
+    () => compileProduct({
+      name: "fixture",
+      commands: defineCommands({}),
+      handlers: {},
+      skills: defineSkills({
+        invalid: {
+          summary: "Invalid budget.",
+          outputBudgetBytes: MIN_SKILL_OUTPUT_BUDGET_BYTES - 1,
+          steps: [{ kind: "prose", text: "No." }],
+        },
+      }),
+    }),
+    (error) => error instanceof SkillConstructionError
+      && error.issues.some((issue) => issue.code === "INVALID_SKILL_OUTPUT_BUDGET"),
+  );
+  const projected = projectSkill(fixture(), "document.policy");
+  assert.throws(
+    () => renderSkillText(projected, { maxBytes: MIN_SKILL_OUTPUT_BUDGET_BYTES - 1 }),
+    (error) => error instanceof OutputPolicyError && error.failureKind === "budget",
+  );
+});
+
+test("Skill command bindings derive a ready canonical invocation", () => {
+  const commands = defineCommands({
+    render: {
+      route: ["render"],
+      summary: "Render.",
+      input: {
+        file: positional(z.string()),
+        out: option("--out", z.string(), { required: true }),
+        json: flag("--json"),
+      },
+      result: z.object({}),
+    },
+  });
+  const handlers = bindHandlers(commands)({ render: () => ({}) });
+  const skills = defineSkills({
+    ready: {
+      summary: "Ready command.",
+      steps: [
+        skillCommand(commands, "render", {
+          guidance: "Render now.",
+          bindings: { file: "input.md", out: "out.html", json: true },
+        }),
+      ],
+    },
+  });
+  const projected = projectSkill(compileProduct({ name: "fixture", commands, handlers, skills }), "ready");
+  assert.deepEqual(projected.steps[0].invocation, {
+    state: "ready",
+    commandId: "render",
+    value: {
+      executable: "fixture",
+      argv: ["render", "input.md", "--out", "out.html", "--json"],
+    },
+  });
 });
 
 test("Skill metadata and delegation are preserved and validated", () => {

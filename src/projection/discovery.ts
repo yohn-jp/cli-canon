@@ -1,5 +1,4 @@
-import type { CommandCatalog } from "../command/model.js";
-import type { CompiledProduct } from "../command/compiler.js";
+import type { ProjectionCommandSource } from "./source.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
 import type { OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
 
@@ -35,6 +34,12 @@ export interface DiscoveryRequest {
   readonly route?: readonly string[];
 }
 
+export interface DiscoveryProjectionProduct {
+  readonly name: string;
+  readonly packageMetadata?: ProductPackageIdentity;
+  readonly commands: readonly ProjectionCommandSource[];
+}
+
 function compareCommands(
   left: { readonly route: readonly string[]; readonly id: string },
   right: { readonly route: readonly string[]; readonly id: string },
@@ -44,8 +49,8 @@ function compareCommands(
   return leftRoute < rightRoute ? -1 : leftRoute > rightRoute ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
-export function projectDiscovery<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+export function projectDiscovery(
+  product: DiscoveryProjectionProduct,
   request: DiscoveryRequest = {},
 ): ProductDiscovery {
   const commands = product.commands
