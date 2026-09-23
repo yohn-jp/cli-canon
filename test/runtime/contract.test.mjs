@@ -135,6 +135,35 @@ test("declared anywhere flags work before the nested route", async () => {
   assert.equal(JSON.parse(result.stdout).json, true);
 });
 
+test("declared anywhere required-value options work before a nested route", async () => {
+  const commands = defineCommands({
+    "repository.list": {
+      route: ["repository", "list"],
+      summary: "List repository records.",
+      input: {
+        repository: option("--repository", z.string(), { required: true, placement: "anywhere" }),
+      },
+      result: z.object({ repository: z.string() }),
+    },
+  });
+  const product = compileProduct({
+    name: "fixture",
+    commands,
+    handlers: bindHandlers(commands)({ "repository.list": ({ repository }) => ({ repository }) }),
+  });
+  for (const argv of [
+    ["--repository=owner/project", "repository", "list"],
+    ["repository", "list", "--repository", "owner/project"],
+  ]) {
+    const result = await runNodeCli(product, argv);
+    assert.equal(result.exitCode, 0, argv.join(" "));
+    assert.deepEqual(JSON.parse(result.stdout), { repository: "owner/project" });
+  }
+  const missing = await runNodeCli(product, ["repository", "list"]);
+  assert.notEqual(missing.exitCode, 0);
+  assert.equal(missing.failureKind, "usage");
+});
+
 test("zod rejects invalid runtime input before the handler", async () => {
   const result = await runNodeCli(fixture(), ["math", "double", "not-a-number"]);
   assert.equal(result.exitCode, 2);
@@ -147,6 +176,7 @@ test("unknown options, surplus positionals, and missing required option fail clo
     ["math", "double", "2", "extra"],
     ["math", "double", "2", "--unknown"],
     ["document", "render", "input.md"],
+    ["document", "render", "input.md", "--out"],
   ]) {
     const result = await runNodeCli(fixture(), argv);
     assert.notEqual(result.exitCode, 0, argv.join(" "));
@@ -191,6 +221,43 @@ test("text help and JSON discovery are projections of the compiled product", asy
   const jsonHelp = await runNodeCli(product, ["--help"], { helpFormat: "json" });
   assert.equal(jsonHelp.exitCode, 0);
   assert.deepEqual(JSON.parse(jsonHelp.stdout), discovery);
+});
+
+test("help and discovery order is deterministic across declaration insertion order", () => {
+  const declarations = {
+    "zeta.run": {
+      route: ["zeta", "run"],
+      summary: "Run zeta.",
+      input: {},
+      result: z.object({}),
+    },
+    "alpha.show": {
+      route: ["alpha", "show"],
+      summary: "Show alpha.",
+      input: {},
+      result: z.object({}),
+    },
+  };
+  const expectedHelp = "Usage: fixture <command>\n\nCommands:\n  alpha\tShow alpha.\n  zeta\tRun zeta.\n\nHelp: --help[=full|json]\n";
+  const expectedDiscovery = {
+    name: "fixture",
+    commands: [
+      { id: "alpha.show", route: ["alpha", "show"], summary: "Show alpha.", fields: [] },
+      { id: "zeta.run", route: ["zeta", "run"], summary: "Run zeta.", fields: [] },
+    ],
+  };
+  for (const commands of [
+    defineCommands(declarations),
+    defineCommands(Object.fromEntries(Object.entries(declarations).reverse())),
+  ]) {
+    const product = compileProduct({
+      name: "fixture",
+      commands,
+      handlers: { "alpha.show": () => ({}), "zeta.run": () => ({}) },
+    });
+    assert.equal(renderHelp(product), expectedHelp);
+    assert.deepEqual(projectDiscovery(product), expectedDiscovery);
+  }
 });
 
 test("optional positional and optional-value option grammar reaches handlers", async () => {
@@ -281,6 +348,69 @@ test("progressive text, full, and JSON help share command canon metadata", async
   assert.deepEqual(JSON.parse(domainJson.stdout).commands.map((command) => command.id), ["domain.list", "domain.show"]);
 });
 
+test("architecture example progressive help uses only the Command Canon", async () => {
+  const commands = defineCommands({
+    "architecture.example": {
+      route: ["architecture", "example"],
+      summary: "Show an architecture example.",
+      description: "Read one example from the canonical architecture.",
+      examples: ["fixture architecture example --format=full"],
+      input: {
+        format: option("--format", z.enum(["full", "json"]), {
+          valueArity: "optional",
+          description: "Choose the example detail level.",
+        }),
+      },
+      result: z.object({}),
+    },
+  });
+  const product = compileProduct({
+    name: "fixture",
+    commands,
+    handlers: bindHandlers(commands)({ "architecture.example": () => ({}) }),
+  });
+
+  assert.equal(
+    (await runNodeCli(product, ["--help"])).stdout,
+    "Usage: fixture <command>\n\nCommands:\n  architecture\tShow an architecture example.\n\nHelp: --help[=full|json]\n",
+  );
+  const domainHelp = await runNodeCli(product, ["architecture", "--help=full"]);
+  assert.equal(
+    domainHelp.stdout,
+    "Usage: fixture architecture <command>\n\nCommands:\n  example\tShow an architecture example.\n    Read one example from the canonical architecture.\n\nHelp: --help[=full|json]\n",
+  );
+
+  const leafHelp = await runNodeCli(product, ["architecture", "example", "--help=full"]);
+  assert.equal(
+    leafHelp.stdout,
+    "Usage: fixture architecture example [--format[=<format>]]\n\nShow an architecture example.\n\nRead one example from the canonical architecture.\n\nOptions:\n  [--format[=<format>]]\tChoose the example detail level.\n\nExamples:\n  fixture architecture example --format=full\n\nHelp: --help[=full|json]\n",
+  );
+
+  const jsonHelp = await runNodeCli(product, ["architecture", "example", "--help=json"]);
+  assert.deepEqual(JSON.parse(jsonHelp.stdout), {
+    name: "fixture",
+    commands: [{
+      id: "architecture.example",
+      route: ["architecture", "example"],
+      summary: "Show an architecture example.",
+      description: "Read one example from the canonical architecture.",
+      examples: ["fixture architecture example --format=full"],
+      fields: [{
+        key: "format",
+        kind: "option",
+        flag: "--format",
+        aliases: [],
+        placement: "after-route",
+        description: "Choose the example detail level.",
+        repeatable: false,
+        required: false,
+        valueArity: "optional",
+        optionLookingValuePolicy: "consume",
+      }],
+    }],
+  });
+});
+
 test("result schema rejects a handler result that violates its declared contract", async () => {
   const commands = defineCommands({
     bad: {
@@ -340,6 +470,45 @@ test("compileProduct rejects duplicate routes and conflicting anywhere flags", (
       error instanceof CanonConstructionError &&
       error.issues.some((issue) => issue.code === "FLAG_COLLISION"),
   );
+});
+
+test("compileProduct rejects missing and unknown handler bindings at construction", () => {
+  const commands = defineCommands({
+    run: { route: ["run"], summary: "Run.", input: {}, result: z.object({}) },
+  });
+  for (const handlers of [{}, { run: () => ({}), unknown: () => ({}) }]) {
+    assert.throws(
+      () => compileProduct({ name: "fixture", commands, handlers }),
+      (error) => error instanceof CanonConstructionError &&
+        error.issues.some((issue) => issue.code === "INVALID_HANDLER_BINDING"),
+    );
+  }
+});
+
+test("compiled command definitions and handler bindings snapshot their authoring inputs", async () => {
+  const commands = defineCommands({
+    echo: {
+      route: ["echo"],
+      summary: "Echo.",
+      input: { value: positional(z.string()) },
+      result: z.object({ value: z.string() }),
+    },
+  });
+  let calls = 0;
+  const handlers = bindHandlers(commands)({ echo: ({ value }) => { calls += 1; return { value }; } });
+  const product = compileProduct({ name: "fixture", commands, handlers });
+  assert.equal(calls, 0);
+
+  commands.echo.input.value = positional(z.number());
+  handlers.echo = () => ({ value: "mutated" });
+
+  const result = await runNodeCli(product, ["echo", "original"]);
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout), { value: "original" });
+  assert.equal(calls, 1);
+  assert.equal(Object.isFrozen(product.commands[0]?.definition), true);
+  assert.equal(Object.isFrozen(product.commands[0]?.definition.input), true);
+  assert.equal(Object.isFrozen(product.handlers), true);
 });
 
 test("unsupported ordered groups and option-looking-value rejection fail during construction", () => {

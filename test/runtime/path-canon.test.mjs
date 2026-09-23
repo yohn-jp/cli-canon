@@ -21,6 +21,7 @@ test("compileProduct includes validated canonical paths", () => {
 test("path IDs and parent references resolve from explicit platform context", () => {
   const paths = definePaths({
     project: { root: "cwd" },
+    projectAlias: { parent: "project" },
     cache: { parent: "project", segments: [".cache", "cli-canon"] },
     data: { root: { env: "APP_DATA" }, segments: ["cli-canon"] },
     config: { root: "home", segments: [".config", "cli-canon"] },
@@ -35,6 +36,7 @@ test("path IDs and parent references resolve from explicit platform context", ()
   });
 
   assert.equal(resolved.project, "/work/project");
+  assert.equal(resolved.projectAlias, "/work/project");
   assert.equal(resolved.cache, "/work/project/.cache/cli-canon");
   assert.equal(resolved.data, "/var/share/app/cli-canon");
   assert.equal(resolved.config, "/home/sophia/.config/cli-canon");

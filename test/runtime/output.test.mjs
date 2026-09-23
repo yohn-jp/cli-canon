@@ -22,6 +22,8 @@ test("JSON byte budget includes Unicode and the final newline at below, exact, a
   const below = jsonOutput(value, { maxBytes: bytes - 1 });
   assert.equal(below.status, "failure");
   assert.equal(below.failureKind, "budget");
+  assert.equal(below.stream, "stderr");
+  assert.equal(below.output, "");
   assert.ok(Buffer.byteLength(below.output, "utf8") <= bytes - 1);
 
   const exact = jsonOutput(value, { maxBytes: bytes });

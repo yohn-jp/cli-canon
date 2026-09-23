@@ -47,9 +47,9 @@ function flagsFor(field: CompiledField): string {
   return field.valueArity === "optional" ? `${prefix} [${metavar}]` : `${prefix} <${metavar}>`;
 }
 
-function makeOption(field: CompiledField): Option {
+function makeOption(field: CompiledField, enforceRequired = true): Option {
   const result = new Option(flagsFor(field));
-  if (field.kind === "option" && field.required === true) result.makeOptionMandatory(true);
+  if (field.kind === "option" && field.required === true && enforceRequired) result.makeOptionMandatory(true);
   if (field.kind === "option" && field.repeatable === true) {
     result.argParser((value: string, previous: string[] | undefined) => [...(previous ?? []), value]);
   }
@@ -112,7 +112,7 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
       command.argument(field.required === false ? `[${name}]` : `<${name}>`);
     }
     else if (field.kind === "raw-args") command.argument("[args...]");
-    else command.addOption(makeOption(field));
+    else command.addOption(makeOption(field, field.placement !== "anywhere"));
   }
   command.allowExcessArguments(false);
 }
@@ -147,7 +147,7 @@ function addAnywhereOptions<const Catalog extends CommandCatalog>(
       ) {
         if (seen.has(field.flag)) continue;
         seen.add(field.flag);
-        program.addOption(makeOption(field));
+        program.addOption(makeOption(field, false));
       }
     }
   }
@@ -340,6 +340,17 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
                 raw[field.key] = local ?? rootValue;
               }
             }
+          }
+
+          const missingRequiredOption = compiled.fields.find((field) => {
+            if (field.kind !== "option" || field.required !== true) return false;
+            const value = raw[field.key];
+            return field.repeatable === true
+              ? !Array.isArray(value) || value.length === 0
+              : value === undefined;
+          });
+          if (missingRequiredOption !== undefined) {
+            return failureResult("usage", `error: required option '${missingRequiredOption.flag}' not specified\n`, 2, options.maxOutputBytes);
           }
 
           let decoded: Readonly<Record<string, unknown>>;

@@ -100,9 +100,10 @@ test("Skill projection derives command metadata and preserves prose steps", () =
     route: ["document", "list"],
   });
   assert.deepEqual(projectSkills(product).map((skill) => skill.id), ["document.review", "document.policy"]);
-  assert.match(renderSkillText(projected), /Requires input: file, out/);
-  assert.match(renderSkillText(projected), /Requires prerequisites: The document is ready for review\./);
-  assert.equal(renderSkillText(projected), renderSkillText(projected));
+  const expectedText = "Prepare a document for review.\n\nChoose the input document and output location.\n\nRender the chosen document.\nRun: fixture document render <file> --out <path> [--json]\nRequires input: file, out\nRequires prerequisites: The document is ready for review.\nHelp: document.render\n\nCheck the available documents.\nRun: fixture document list\nHelp: document.list\n";
+  const text = renderSkillText(projected);
+  assert.equal(text, expectedText);
+  assert.equal(renderSkillText(projected), text);
 });
 
 test("Skill JSON projection is deterministic, valid, and keeps long content intact", () => {
