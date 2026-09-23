@@ -71,7 +71,23 @@ try {
   writeFileSync(
     path.join(consumer, "consumer.ts"),
     `import * as z from "zod";
-import { bindHandlers, compileProduct, defineCommands, jsonOutput, option, positional, type CliIO, type CliOutcome, type CommandId, type DomainErrorAdapter } from "@yohn-jp/cli-canon";
+import {
+  bindHandlers,
+  compilePaths,
+  compileProduct,
+  defineCommands,
+  definePaths,
+  jsonOutput,
+  option,
+  positional,
+  resolvePaths,
+  type CliIO,
+  type CliOutcome,
+  type CommandId,
+  type DomainErrorAdapter,
+  type PathId,
+  type PathParameterName,
+} from "@yohn-jp/cli-canon";
 import { runNodeCli } from "@yohn-jp/cli-canon/node";
 
 const commands = defineCommands({
@@ -103,6 +119,46 @@ void validId;
 // @ts-expect-error IDs are inferred from the declarations in the packed types.
 const invalidId: Id = "example.unknown";
 void invalidId;
+const paths = definePaths({
+  app: {
+    root: {
+      candidates: [
+        { env: "APP_DATA", absoluteOnly: true },
+        { platform: "win32", root: { env: "LOCALAPPDATA" }, segments: ["fixture"] },
+        { default: "home", segments: [".local", "share", "fixture"] },
+      ],
+    },
+  },
+  project: { parent: "app", segments: ["projects", { param: "projectId" }], kind: "directory" },
+  manifest: { parent: "project", segments: ["manifest.json"], kind: "file" },
+});
+const compiledPaths = compilePaths(paths);
+void resolvePaths(compiledPaths, {
+  platform: "posix",
+  home: "/home/user",
+  parameters: { projectId: "fixture-1" },
+});
+type Path = PathId<typeof paths>;
+const validPath: Path = "manifest";
+void validPath;
+// @ts-expect-error Path IDs are inferred from the packed declarations.
+const invalidPath: Path = "missing";
+void invalidPath;
+type Parameter = PathParameterName<typeof paths>;
+const validParameter: Parameter = "projectId";
+void validParameter;
+// @ts-expect-error Required path parameters are inferred from the packed declarations.
+const invalidParameter: Parameter = "workspaceId";
+void invalidParameter;
+// @ts-expect-error Packed resolution types require every declared path parameter.
+resolvePaths(compiledPaths, { platform: "posix", home: "/home/user" });
+// @ts-expect-error Packed resolution types reject undeclared path parameters.
+resolvePaths(compiledPaths, {
+  platform: "posix",
+  home: "/home/user",
+  parameters: { projectId: "fixture-1", extra: "unexpected" },
+});
+
 interface ExampleDomainError { readonly code: "EXAMPLE_DENIED"; readonly message: string }
 const domainErrorAdapter: DomainErrorAdapter<ExampleDomainError> = {
   is: (error): error is ExampleDomainError => typeof error === "object"
@@ -150,6 +206,27 @@ api.writeCliOutcome(output, {
   writeStderr: (text) => writes.push(["stderr", text]),
 });
 assert.deepEqual(writes, [["stdout", expectedJson]]);
+const paths = api.compilePaths(api.definePaths({
+  app: {
+    root: {
+      candidates: [
+        { env: "APP_DATA", absoluteOnly: true },
+        { platform: "win32", root: { env: "LOCALAPPDATA" }, segments: ["fixture"] },
+        { default: "home", segments: [".local", "share", "fixture"] },
+      ],
+    },
+  },
+  project: { parent: "app", segments: ["projects", { param: "projectId" }] },
+  manifest: { parent: "project", segments: ["manifest.json"], kind: "file" },
+}));
+assert.equal(paths.paths.find((entry) => entry.id === "manifest")?.kind, "file");
+assert.equal(api.resolvePaths(paths, {
+  platform: "posix",
+  home: "/home/user",
+  env: { APP_DATA: "relative/value" },
+  parameters: { projectId: "fixture-1" },
+}).manifest, "/home/user/.local/share/fixture/projects/fixture-1/manifest.json");
+
 console.log("packed consumer verified");
 `,
   );
