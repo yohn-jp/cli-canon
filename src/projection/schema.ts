@@ -1,5 +1,5 @@
 import * as z from "zod";
-import type { CompiledCommand } from "../command/compiler.js";
+import type { ProjectionCommandSource } from "./source.js";
 
 export type SchemaProjectionCompleteness = "complete" | "structural-only";
 export type SchemaProjectionIO = "input" | "output";
@@ -22,7 +22,7 @@ export interface CommandSchemaProjection {
 }
 
 export interface SchemaProjectionProduct {
-  readonly commands: readonly CompiledCommand[];
+  readonly commands: readonly ProjectionCommandSource[];
 }
 
 const JSON_SCHEMA_CHECKS = [
