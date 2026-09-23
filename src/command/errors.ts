@@ -3,6 +3,7 @@ export type CanonConstructionErrorCode =
   | "FLAG_COLLISION"
   | "INVALID_FLAG"
   | "INVALID_ROUTE"
+  | "INVALID_PRODUCT_IDENTITY"
   | "INVALID_INPUT_GRAMMAR"
   | "UNSUPPORTED_GRAMMAR";
 

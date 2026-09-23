@@ -1,5 +1,6 @@
 import type { CommandCatalog } from "../command/model.js";
 import type { CompiledProduct } from "../command/compiler.js";
+import type { ProductPackageIdentity } from "../product/identity.js";
 import type { OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
 
 export interface CommandDiscovery {
@@ -25,6 +26,7 @@ export interface CommandDiscovery {
 
 export interface ProductDiscovery {
   readonly name: string;
+  readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly CommandDiscovery[];
 }
 
@@ -54,6 +56,21 @@ export function projectDiscovery<const Catalog extends CommandCatalog>(
     .sort(compareCommands);
   return {
     name: product.name,
+    ...(product.packageMetadata === undefined
+      ? {}
+      : {
+          packageMetadata: {
+            name: product.packageMetadata.name,
+            version: product.packageMetadata.version,
+            ...(product.packageMetadata.bin === undefined
+              ? {}
+              : {
+                  bin: typeof product.packageMetadata.bin === "string"
+                    ? product.packageMetadata.bin
+                    : { ...product.packageMetadata.bin },
+                }),
+          },
+        }),
     commands: commands.map((command) => ({
       id: command.id,
       route: [...command.route],

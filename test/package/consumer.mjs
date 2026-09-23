@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import fixturePackageMetadata from "../runtime/fixture-package.json" with { type: "json" };
 import { assertRootImportPure } from "./root-import-purity.mjs";
 
 function run(command, args, options = {}) {
@@ -31,6 +32,8 @@ try {
     "package/dist/index.d.ts",
     "package/dist/node/index.js",
     "package/dist/node/index.d.ts",
+    "package/dist/testing/index.js",
+    "package/dist/testing/index.d.ts",
   ]) {
     assert.ok(packedFiles.includes(file), `packed tarball must contain ${file}`);
   }
@@ -45,11 +48,16 @@ try {
     types: "./dist/node/index.d.ts",
     import: "./dist/node/index.js",
   });
+  assert.deepEqual(packedManifest.exports["./testing"], {
+    types: "./dist/testing/index.d.ts",
+    import: "./dist/testing/index.js",
+  });
 
   writeFileSync(
     path.join(consumer, "package.json"),
     JSON.stringify(
       {
+        ...fixturePackageMetadata,
         type: "module",
         private: true,
         dependencies: {
@@ -87,8 +95,11 @@ import {
   type DomainErrorAdapter,
   type PathId,
   type PathParameterName,
+  projectProductSchemas,
+  type ProductPackageIdentity,
 } from "@yohn-jp/cli-canon";
 import { runNodeCli } from "@yohn-jp/cli-canon/node";
+import { certifyScenarios, type CertificationScenario } from "@yohn-jp/cli-canon/testing";
 
 const commands = defineCommands({
   "example.echo": {
@@ -111,7 +122,13 @@ const handlers = bindHandlers(commands)({ "example.echo": ({ message, suffix, fo
   format satisfies "full" | "json" | undefined;
   return { message, suffix, format };
 } });
-const product = compileProduct({ name: "fixture-cli", commands, handlers });
+const packageMetadata: ProductPackageIdentity = {
+  name: "fixture-cli",
+  version: "2.4.1",
+  bin: { "fixture-cli": "./bin/fixture-cli.js" },
+};
+const product = compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers });
+void projectProductSchemas(product, "complete");
 void runNodeCli(product, ["echo", "typed package", "--format=full"]);
 type Id = CommandId<typeof commands>;
 const validId: Id = "example.echo";
@@ -171,6 +188,14 @@ const io: CliIO = { writeStdout: (_output) => {}, writeStderr: (_output) => {} }
 const outcome: CliOutcome = jsonOutput({ ok: true }, { maxBytes: 64 });
 void io;
 void outcome;
+const typedScenario: CertificationScenario<{ value: string }, number> = {
+  id: "typed certification",
+  expected: 1,
+  run: ({ value }) => value.length,
+};
+void certifyScenarios([typedScenario], [{ id: "packed", context: { value: "x" } }], (actual, expected) => {
+  if (actual !== expected) throw new Error("scenario did not match its independent expectation");
+});
 
 `,
   );
@@ -180,10 +205,16 @@ void outcome;
     `import assert from "node:assert/strict";
 import * as api from "@yohn-jp/cli-canon";
 import * as node from "@yohn-jp/cli-canon/node";
-import { certificationOracle } from "./fixture-oracle.mjs";
-import { runCertificationScenario } from "./fixture-scenario.mjs";
+import packageMetadata from "./package.json" with { type: "json" };
+import { certifyScenarios } from "@yohn-jp/cli-canon/testing";
+import { createCertificationScenario } from "./fixture-scenario.mjs";
 
-assert.deepEqual(await runCertificationScenario(api, node), certificationOracle);
+assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
+await certifyScenarios(
+  [createCertificationScenario(packageMetadata)],
+  [{ id: "packed", context: { api, node } }],
+  (actual, expected) => assert.deepEqual(actual, expected),
+);
 const expectedJson = '{"message":"雪"}\\n';
 const jsonBytes = Buffer.byteLength(expectedJson, "utf8");
 const output = api.jsonOutput({ message: "雪" }, { maxBytes: jsonBytes });

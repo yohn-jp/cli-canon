@@ -76,3 +76,24 @@ export const certificationOracle = {
     trailingNewline: true,
   },
 };
+export function certificationOracleFor(packageMetadata) {
+  const projectedPackageMetadata = {
+    name: packageMetadata.name,
+    version: packageMetadata.version,
+    ...(packageMetadata.bin === undefined ? {} : { bin: packageMetadata.bin }),
+  };
+  const discovery = {
+    ...certificationOracle.discovery,
+    packageMetadata: projectedPackageMetadata,
+  };
+
+  return {
+    ...certificationOracle,
+    discovery,
+    jsonHelp: {
+      ...certificationOracle.jsonHelp,
+      discovery,
+    },
+  };
+}
+
