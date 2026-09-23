@@ -1,5 +1,5 @@
-import type { CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog, CommandId } from "../command/model.js";
+import type { CompiledCommand } from "../command/compiler.js";
+import type { CommandId } from "../command/model.js";
 import { renderHelp } from "../projection/help.js";
 import {
   projectInvocation,
@@ -17,10 +17,8 @@ import type { JsonOutputPolicyOptions, OutputPolicyOptions } from "../output/mod
 import { OutputPolicyError } from "../output/errors.js";
 import { jsonOutput, textOutput } from "../output/policy.js";
 
-export interface SkillProjectionProduct<
-  Catalog extends CommandCatalog,
-  Skills extends SkillCatalog,
-> extends InvocationProjectionProduct<Catalog> {
+export interface SkillProjectionProduct<Skills extends SkillCatalog = SkillCatalog>
+  extends InvocationProjectionProduct {
   readonly skills: CompiledSkills<Skills>;
 }
 
@@ -60,8 +58,8 @@ export interface ProjectedSkill<Id extends string = string, CommandId extends st
   readonly steps: readonly ProjectedSkillStep<CommandId, Id>[];
 }
 
-function projectedStep<const Catalog extends CommandCatalog, StepCommandId extends string, Id extends string>(
-  product: InvocationProjectionProduct<Catalog>,
+function projectedStep<StepCommandId extends string, Id extends string>(
+  product: InvocationProjectionProduct,
   step: CompiledSkillStep<StepCommandId, Id>,
 ): ProjectedSkillStep<StepCommandId, Id> {
   if (step.kind === "prose") return { kind: "prose", text: step.text };
@@ -80,8 +78,8 @@ function projectedStep<const Catalog extends CommandCatalog, StepCommandId exten
   const usage = usageLine.startsWith("Usage: ") ? usageLine.slice("Usage: ".length) : usageLine;
   const projectedInvocation = projectInvocation(
     product,
-    command.id as CommandId<Catalog>,
-    step.bindings as never,
+    String(command.id),
+    step.bindings,
   );
   const prerequisiteRequirements = step.prerequisites.map((text) => Object.freeze({
     kind: "prerequisite" as const,
@@ -119,10 +117,9 @@ function projectedStep<const Catalog extends CommandCatalog, StepCommandId exten
 }
 
 export function projectSkill<
-  const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog,
 >(
-  product: SkillProjectionProduct<Catalog, Skills>,
+  product: SkillProjectionProduct<Skills>,
   skillId: SkillId<Skills>,
 ): ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>> {
   const skill = product.skills.find((candidate) => candidate.id === skillId);
@@ -139,9 +136,8 @@ export function projectSkill<
 }
 
 export function projectSkills<
-  const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog,
->(product: SkillProjectionProduct<Catalog, Skills>): readonly ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>>[] {
+>(product: SkillProjectionProduct<Skills>): readonly ProjectedSkill<SkillId<Skills>, SkillCommandId<Skills>>[] {
   return product.skills.map((skill) => projectSkill(product, skill.id));
 }
 
