@@ -18,10 +18,7 @@ import {
   type NodeCliTerminalAdapter,
   type StructuredUsageErrorCode,
 } from "../../src/node/index.js";
-import {
-  certifyScenarios,
-  type CertificationScenario,
-} from "../../src/testing/index.js";
+import { certifyScenarios, type CertificationScenario } from "../../src/testing/index.js";
 
 const packageMetadata: ProductPackageIdentity = {
   name: "@example/fixture",
@@ -39,7 +36,13 @@ const commands = defineCommands({
 const handlers = bindHandlers(commands)({
   "fixture.read": ({ file, format }) => ({ contents: format === "json" ? JSON.stringify(file) : file }),
 });
-const compiled = compileProduct({ name: "fixture", packageMetadata, commands, handlers, schemaProjectionCompleteness: "complete" });
+const compiled = compileProduct({
+  name: "fixture",
+  packageMetadata,
+  commands,
+  handlers,
+  schemaProjectionCompleteness: "complete",
+});
 projectProductSchemas(compiled, "complete");
 
 const legacyRoutes = [{ id: "legacy.help", route: ["legacy"], summary: "A legacy route.", fields: [] }] as const;

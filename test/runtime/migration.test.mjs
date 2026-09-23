@@ -15,11 +15,7 @@ import {
   renderHelp,
   textOutput,
 } from "../../dist/index.js";
-import {
-  executeNodeCli,
-  projectNodeCliExecution,
-  runNodeCli,
-} from "../../dist/node/index.js";
+import { executeNodeCli, projectNodeCliExecution, runNodeCli } from "../../dist/node/index.js";
 
 function architectureFixture() {
   const commands = defineCommands({
@@ -49,17 +45,19 @@ function architectureFixture() {
       id: "legacy.auth.login",
       route: ["auth", "login"],
       summary: "Sign in to a service.",
-      fields: [{
-        key: "account",
-        kind: "option",
-        flag: "--account",
-        aliases: [],
-        repeatable: false,
-        required: true,
-        valueArity: "required",
-        optionLookingValuePolicy: "consume",
-        placement: "after-route",
-      }],
+      fields: [
+        {
+          key: "account",
+          kind: "option",
+          flag: "--account",
+          aliases: [],
+          repeatable: false,
+          required: true,
+          valueArity: "required",
+          optionLookingValuePolicy: "consume",
+          placement: "after-route",
+        },
+      ],
     },
     {
       id: "legacy.architecture.zones",
@@ -139,15 +137,16 @@ test("mixed route projection composes summary, full, and JSON help from one boun
 
   const rootJson = await runNodeCli(product, ["--help=json"], { legacyRoutes });
   assert.equal(rootJson.exitCode, 0);
-  assert.deepEqual(JSON.parse(rootJson.stdout).commands.map(({ id }) => id), [
-    "architecture.example",
-    "legacy.architecture.zones",
-    "legacy.auth.login",
-    "legacy.guide",
-  ]);
+  assert.deepEqual(
+    JSON.parse(rootJson.stdout).commands.map(({ id }) => id),
+    ["architecture.example", "legacy.architecture.zones", "legacy.auth.login", "legacy.guide"],
+  );
 
   const leafJson = await runNodeCli(product, ["architecture", "example", "--help=json"], { legacyRoutes });
-  assert.deepEqual(JSON.parse(leafJson.stdout).commands.map(({ id }) => id), ["architecture.example"]);
+  assert.deepEqual(
+    JSON.parse(leafJson.stdout).commands.map(({ id }) => id),
+    ["architecture.example"],
+  );
 });
 
 test("mixed route composition rejects duplicate and overlapping ownership deterministically", () => {
