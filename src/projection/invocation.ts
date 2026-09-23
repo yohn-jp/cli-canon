@@ -10,6 +10,8 @@ import type {
   PositionalField,
   RawArgsField,
 } from "../command/model.js";
+import type { SkillCatalog, SkillId } from "../skill/model.js";
+import type { PathCatalog } from "../path/model.js";
 
 export interface CliInvocation {
   readonly executable: string;
@@ -145,19 +147,26 @@ function appendOption(argv: string[], flag: string, value: unknown): void {
   if (value !== true) argv.push(value as string);
 }
 
-export interface InvocationProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
+export interface InvocationProjectionProduct {
   readonly name: string;
-  readonly commands: CompiledProduct<Catalog>["commands"];
+  readonly commands: readonly CompiledCommand[];
 }
 
 export function projectInvocation<
   const Catalog extends CommandCatalog,
+  const Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>>,
+  const Paths extends PathCatalog<Extract<keyof Paths, string>>,
   const Id extends CommandId<Catalog>,
 >(
-  product: InvocationProjectionProduct<Catalog>,
+  product: CompiledProduct<Catalog, Skills, Paths>,
   commandId: Id,
   bindings?: InvocationBindings<Catalog[Id]>,
 ): InvocationProjection<Id>;
+export function projectInvocation(
+  product: InvocationProjectionProduct,
+  commandId: string,
+  bindings?: Readonly<Record<string, unknown>>,
+): InvocationProjection;
 export function projectInvocation(
   product: InvocationProjectionProduct,
   commandId: string,
