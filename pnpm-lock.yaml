@@ -14,9 +14,6 @@ importers:
       prettier:
         specifier: 3.9.8
         version: 3.9.8
-      suzukuri:
-        specifier: 0.3.1
-        version: 0.3.1
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -40,12 +37,6 @@ packages:
     engines: { node: ">=14" }
     hasBin: true
 
-  suzukuri@0.3.1:
-    resolution:
-      { integrity: sha512-FbAZFW0+YIX2C1QCQoSQEABJcHF6O8i0MD9NaG4anR9PH9BBGuJnbT6vp5jmxHQXdZXP5S0Y5EevNnQoDp7gPQ== }
-    engines: { node: ">=24" }
-    hasBin: true
-
   typescript@6.0.3:
     resolution:
       { integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw== }
@@ -60,10 +51,6 @@ snapshots:
   commander@15.0.0: {}
 
   prettier@3.9.8: {}
-
-  suzukuri@0.3.1:
-    dependencies:
-      typescript: 6.0.3
 
   typescript@6.0.3: {}
 
