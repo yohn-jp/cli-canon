@@ -163,8 +163,7 @@ import { runNodeCli } from "@yohn-jp/cli-canon/node";
 await runNodeCli(product, argv, {
   legacyRoutes,
   terminalAdapter: {
-    help: ({ mode, request, discovery }) =>
-      textOutput(renderProductHelp({ mode, request, discovery })),
+    help: ({ mode, request, discovery }) => textOutput(renderProductHelp({ mode, request, discovery })),
   },
 });
 ```
