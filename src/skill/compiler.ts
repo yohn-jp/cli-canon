@@ -1,5 +1,14 @@
 import type { CompiledCommand } from "../command/compiler.js";
-import type { SkillCatalog, SkillId } from "./model.js";
+import {
+  InvocationProjectionError,
+  validateInvocationBindings,
+} from "../projection/invocation.js";
+import {
+  DEFAULT_SKILL_OUTPUT_BUDGET_BYTES,
+  MIN_SKILL_OUTPUT_BUDGET_BYTES,
+  type SkillCatalog,
+  type SkillId,
+} from "./model.js";
 import { SkillConstructionError, type SkillConstructionIssue } from "./errors.js";
 
 export interface CompiledProseSkillStep {
@@ -12,6 +21,7 @@ export interface CompiledCommandSkillStep<CommandId extends string = string> {
   readonly commandId: CommandId;
   readonly guidance: string;
   readonly prerequisites: readonly string[];
+  readonly bindings: Readonly<Record<string, unknown>>;
 }
 
 export interface CompiledDelegateSkillStep<Id extends string = string> {
@@ -36,6 +46,7 @@ export interface CompiledSkill<Id extends string = string, CommandId extends str
   readonly intent?: string;
   readonly invariants: readonly string[];
   readonly references: readonly CompiledDomainResultReference[];
+  readonly outputBudgetBytes: number;
   readonly steps: readonly CompiledSkillStep<CommandId, Id>[];
 }
 
@@ -54,7 +65,16 @@ export type CompiledSkills<Catalog extends SkillCatalog> = readonly CompiledSkil
   SkillCommandId<Catalog>
 >[];
 
-/** Validate Skill command and delegation references against the compiled Canon. */
+function snapshotBindings(value: Readonly<Record<string, unknown>> | undefined): Readonly<Record<string, unknown>> {
+  return Object.freeze(Object.fromEntries(
+    Object.entries(value ?? {}).map(([key, item]) => [
+      key,
+      Array.isArray(item) ? Object.freeze([...item]) : item,
+    ]),
+  ));
+}
+
+/** Validate Skill command/delegation references, bindings, and output policy against compiled Canon. */
 export function compileSkills<const Catalog extends SkillCatalog>(
   catalog: Catalog,
   commands: readonly CompiledCommand[],
@@ -66,6 +86,19 @@ export function compileSkills<const Catalog extends SkillCatalog>(
   const delegates = new Map<string, string[]>();
 
   for (const [skillId, definition] of Object.entries(catalog)) {
+    const declaredBudget = definition.outputBudgetBytes ?? DEFAULT_SKILL_OUTPUT_BUDGET_BYTES;
+    const outputBudgetBytes = Number.isSafeInteger(declaredBudget)
+      && declaredBudget >= MIN_SKILL_OUTPUT_BUDGET_BYTES
+      ? declaredBudget
+      : DEFAULT_SKILL_OUTPUT_BUDGET_BYTES;
+    if (outputBudgetBytes !== declaredBudget) {
+      issues.push({
+        code: "INVALID_SKILL_OUTPUT_BUDGET",
+        skillId,
+        message: `skill ${skillId}: outputBudgetBytes must be a safe integer >= ${MIN_SKILL_OUTPUT_BUDGET_BYTES}`,
+      });
+    }
+
     const steps: CompiledSkillStep[] = [];
     const delegateIds: string[] = [];
     for (const [stepIndex, step] of definition.steps.entries()) {
@@ -110,12 +143,29 @@ export function compileSkills<const Catalog extends SkillCatalog>(
           commandId: step.commandId,
           message: `skill ${skillId} step ${stepIndex}: private command ${step.commandId} cannot appear in a public Skill projection`,
         });
+      } else {
+        try {
+          validateInvocationBindings(command, step.bindings ?? {});
+        } catch (error) {
+          if (error instanceof InvocationProjectionError) {
+            issues.push({
+              code: "INVALID_COMMAND_BINDING",
+              skillId,
+              stepIndex,
+              commandId: step.commandId,
+              message: `skill ${skillId} step ${stepIndex}: ${error.message}`,
+            });
+          } else {
+            throw error;
+          }
+        }
       }
       steps.push(Object.freeze({
         kind: "command",
         commandId: step.commandId,
         guidance: step.guidance,
         prerequisites: Object.freeze([...(step.prerequisites ?? [])]),
+        bindings: snapshotBindings(step.bindings),
       }));
     }
     delegates.set(skillId, delegateIds);
@@ -128,6 +178,7 @@ export function compileSkills<const Catalog extends SkillCatalog>(
         kind: "domain-result" as const,
         id: reference.id,
       }))),
+      outputBudgetBytes,
       steps: Object.freeze(steps),
     }));
   }
