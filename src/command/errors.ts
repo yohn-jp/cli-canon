@@ -1,5 +1,7 @@
 export type CanonConstructionErrorCode =
   | "DUPLICATE_ROUTE"
+  | "DUPLICATE_COMMAND_ID"
+  | "OVERLAPPING_ROUTE"
   | "FLAG_COLLISION"
   | "INVALID_FLAG"
   | "INVALID_ROUTE"
