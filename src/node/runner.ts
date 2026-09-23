@@ -1,8 +1,19 @@
 import { Command, CommanderError, Option } from "commander";
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
 import type { CommandCatalog, CommandId, CommandResultOutput, FieldDefinition } from "../command/model.js";
-import { composeCommandProjection, type LegacyRouteDescriptor } from "../projection/discovery.js";
-import { parseHelpMode, projectHelp, type HelpOutputMode } from "../projection/help.js";
+import {
+  composeCommandProjection,
+  projectDiscovery,
+  type DiscoveryProjectionProduct,
+  type LegacyRouteDescriptor,
+} from "../projection/discovery.js";
+import {
+  parseHelpMode,
+  projectHelp,
+  type HelpOutputMode,
+  type HelpRequest,
+  type ParsedHelpMode,
+} from "../projection/help.js";
 import type { DomainErrorAdapter } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
@@ -39,6 +50,10 @@ export interface NodeCliSuccess<Catalog extends CommandCatalog = CommandCatalog>
 export interface NodeCliHelp {
   readonly status: "help";
   readonly mode: HelpOutputMode;
+  /** Canon-resolved help target; consumers never need to parse help argv. */
+  readonly request: HelpRequest;
+  /** Canon-owned metadata scoped to the resolved help target for presentation adapters. */
+  readonly discovery: ProductDiscovery;
   readonly projection: string | ProductDiscovery;
 }
 
@@ -65,6 +80,8 @@ export interface ExecuteNodeCliOptions {
 /** A terminal projection is returned as a Canon output outcome, never written by the handler. */
 export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = CommandCatalog> {
   readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
+  /** Render consumer-specific terminal help from Canon-resolved help metadata. */
+  readonly help?: (execution: NodeCliHelp) => CliOutcome;
   readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
 }
 
@@ -249,6 +266,25 @@ function classifyCommanderError(error: CommanderError, commandId?: string): Stru
   };
 }
 
+function projectHelpDiscovery(product: DiscoveryProjectionProduct, request: HelpRequest): ProductDiscovery {
+  let route: readonly string[] | undefined;
+  if (request.kind === "route") route = request.route;
+  else if (request.kind === "command") {
+    route = product.commands.find((command) => command.id === request.commandId)?.route;
+  }
+  return projectDiscovery(product, route === undefined ? {} : { route });
+}
+
+function nodeCliHelp(product: DiscoveryProjectionProduct, parsed: ParsedHelpMode): NodeCliHelp {
+  return {
+    status: "help",
+    mode: parsed.mode,
+    request: parsed.request,
+    discovery: projectHelpDiscovery(product, parsed.request),
+    projection: projectHelp(product, parsed),
+  };
+}
+
 function usageFailure(failure: StructuredUsageFailure, maxOutputBytes: number | undefined): CliOutcome {
   const message =
     failure.code === "extra-positional-argument"
@@ -286,11 +322,7 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
         usageFailure: { code: "invalid-help-mode", value: parsedHelp.invalidMode },
       };
     }
-    return {
-      status: "help",
-      mode: parsedHelp.mode,
-      projection: projectHelp(projection, parsedHelp),
-    };
+    return nodeCliHelp(projection, parsedHelp);
   }
 
   let invocation: Promise<NodeCliExecution<Catalog>> | undefined;
@@ -391,9 +423,7 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
     if (error instanceof CommanderError) {
       if (error.code === "commander.helpDisplayed") {
         const rootHelp = parseHelpMode(projection, ["--help"], options.helpFormat);
-        if (rootHelp !== undefined) {
-          return { status: "help", mode: rootHelp.mode, projection: projectHelp(projection, rootHelp) };
-        }
+        if (rootHelp !== undefined) return nodeCliHelp(projection, rootHelp);
       }
       return { status: "failure", failureKind: "usage", usageFailure: classifyCommanderError(error) };
     }
@@ -422,10 +452,11 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
   }
   if (execution.status === "help") {
     const outcome =
-      typeof execution.projection === "string"
+      options.terminalAdapter?.help?.(execution) ??
+      (typeof execution.projection === "string"
         ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
-        : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes));
-    return toCliResult(outcome);
+        : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes)));
+    return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
 
   if (execution.failureKind === "usage") {
