@@ -83,11 +83,14 @@ import {
   bindHandlers,
   compilePaths,
   compileProduct,
+  composeCommandProjection,
   defineCommands,
   definePaths,
   jsonOutput,
   option,
+  parseHelpMode,
   positional,
+  projectHelp,
   resolvePaths,
   type CliIO,
   type CliOutcome,
@@ -101,8 +104,15 @@ import {
   defineSkills,
   projectSkill,
   renderSkillJson,
+  textOutput,
 } from "@yohn-jp/cli-canon";
-import { runNodeCli } from "@yohn-jp/cli-canon/node";
+import {
+  executeNodeCli,
+  projectNodeCliExecution,
+  runNodeCli,
+  type NodeCliTerminalAdapter,
+  type StructuredUsageErrorCode,
+} from "@yohn-jp/cli-canon/node";
 import { certifyScenarios, type CertificationScenario } from "@yohn-jp/cli-canon/testing";
 
 const commands = defineCommands({
@@ -134,6 +144,28 @@ const packageMetadata: ProductPackageIdentity = {
 const product = compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers, schemaProjectionCompleteness: "complete" });
 void projectProductSchemas(product, "complete");
 void runNodeCli(product, ["echo", "typed package", "--format=full"]);
+const legacyRoutes = [{ id: "legacy.status", route: ["status"], summary: "Show legacy status.", fields: [] }] as const;
+const composed = composeCommandProjection(product, legacyRoutes);
+const helpRequest = parseHelpMode(composed, ["echo", "--help=full"]);
+if (helpRequest !== undefined) void projectHelp(composed, helpRequest);
+const terminalAdapter: NodeCliTerminalAdapter<typeof commands> = {
+  success: ({ result }) => textOutput(result.message),
+  usageFailure: ({ code }) => {
+    const structuredCode: StructuredUsageErrorCode = code;
+    return textOutput(structuredCode);
+  },
+};
+void executeNodeCli(product, ["echo", "typed package"], { legacyRoutes }).then((execution) => {
+  if (execution.status === "success") {
+    const message: string = execution.result.message;
+    // @ts-expect-error Packed Node APIs preserve the declared handler result type.
+    const invalid: number = execution.result.message;
+    void message;
+    void invalid;
+  }
+  projectNodeCliExecution(execution, { terminalAdapter });
+});
+void runNodeCli(product, ["echo", "typed package"], { legacyRoutes, terminalAdapter });
 const invocation = projectInvocation(product, "example.echo", { message: "typed package", format: "full" });
 if (invocation.state !== "ready") throw new Error("packed invocation must be ready");
 invocation.value.argv satisfies readonly string[];

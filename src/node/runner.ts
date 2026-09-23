@@ -1,19 +1,93 @@
 import { Command, CommanderError, Option } from "commander";
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog, FieldDefinition } from "../command/model.js";
-import { projectDiscovery } from "../projection/discovery.js";
-import { renderHelp, type HelpRequest } from "../projection/help.js";
+import type {
+  CommandCatalog,
+  CommandId,
+  CommandResultOutput,
+  FieldDefinition,
+} from "../command/model.js";
+import { composeCommandProjection, type LegacyRouteDescriptor } from "../projection/discovery.js";
+import { parseHelpMode, projectHelp, type HelpOutputMode } from "../projection/help.js";
 import type { DomainErrorAdapter } from "../output/model.js";
+import type { CliOutcome, CliResult } from "../output/model.js";
+import type { ProductDiscovery } from "../projection/discovery.js";
 import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
-import type { CliResult } from "../output/model.js";
 
 export type { CliFailureKind, CliResult } from "../output/model.js";
 
-export interface RunNodeCliOptions<DomainError = never> {
-  readonly helpFormat?: "text" | "full" | "json";
+export type StructuredUsageErrorCode =
+  | "extra-positional-argument"
+  | "unknown-option"
+  | "missing-option-value"
+  | "missing-required-option"
+  | "missing-positional-argument"
+  | "unknown-command"
+  | "invalid-help-mode"
+  | "no-command"
+  | "invalid-arguments";
+
+/** Parser-owned usage classification; consumers do not need to inspect diagnostics. */
+export interface StructuredUsageFailure {
+  readonly code: StructuredUsageErrorCode;
+  readonly parserCode?: string;
+  readonly commandId?: string;
+  readonly option?: string;
+  readonly value?: string;
+}
+
+export interface NodeCliSuccess<Catalog extends CommandCatalog = CommandCatalog> {
+  readonly status: "success";
+  readonly commandId: CommandId<Catalog>;
+  readonly result: CommandResultOutput<Catalog[CommandId<Catalog>]>;
+}
+
+export interface NodeCliHelp {
+  readonly status: "help";
+  readonly mode: HelpOutputMode;
+  readonly projection: string | ProductDiscovery;
+}
+
+export type NodeCliFailure =
+  | {
+      readonly status: "failure";
+      readonly failureKind: "usage";
+      readonly usageFailure: StructuredUsageFailure;
+    }
+  | {
+      readonly status: "failure";
+      readonly failureKind: "validation" | "handler-result" | "handler-error";
+      readonly error: unknown;
+    };
+
+export type NodeCliExecution<Catalog extends CommandCatalog = CommandCatalog> =
+  | NodeCliSuccess<Catalog>
+  | NodeCliHelp
+  | NodeCliFailure;
+
+export interface ExecuteNodeCliOptions {
+  readonly helpFormat?: HelpOutputMode | "text";
+  readonly legacyRoutes?: readonly LegacyRouteDescriptor[];
+}
+
+/** A terminal projection is returned as a Canon output outcome, never written by the handler. */
+export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = CommandCatalog> {
+  readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
+  readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
+}
+
+export interface ProjectNodeCliExecutionOptions<
+  DomainError = never,
+  Catalog extends CommandCatalog = CommandCatalog,
+> {
   readonly maxOutputBytes?: number;
   readonly domainErrorAdapter?: DomainErrorAdapter<DomainError>;
+  readonly terminalAdapter?: NodeCliTerminalAdapter<Catalog>;
 }
+
+export interface RunNodeCliOptions<
+  DomainError = never,
+  Catalog extends CommandCatalog = CommandCatalog,
+> extends ExecuteNodeCliOptions, ProjectNodeCliExecutionOptions<DomainError, Catalog> {}
 
 function outputPolicyOptions(maxOutputBytes: number | undefined): { readonly maxBytes?: number } {
   return maxOutputBytes === undefined ? {} : { maxBytes: maxOutputBytes };
@@ -25,9 +99,24 @@ function failureResult(
   exitCode: number,
   maxOutputBytes: number | undefined,
   stream: "stdout" | "stderr" = "stderr",
-): CliResult {
+): CliOutcome {
   const bounded = textOutput(output, outputPolicyOptions(maxOutputBytes));
-  return toCliResult(bounded.status === "success" ? cliFailure(failureKind, bounded.output, exitCode, stream) : bounded);
+  return bounded.status === "success"
+    ? cliFailure(failureKind, bounded.output, exitCode, stream)
+    : bounded;
+}
+
+function boundedOutcome(outcome: CliOutcome, maxOutputBytes: number | undefined): CliOutcome {
+  if (maxOutputBytes === undefined) return outcome;
+  const bounded = textOutput(outcome.output, { maxBytes: maxOutputBytes });
+  if (bounded.status === "failure") return bounded;
+  return outcome.status === "success"
+    ? bounded
+    : cliFailure(outcome.failureKind, bounded.output, outcome.exitCode, outcome.stream);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function camelcase(value: string): string {
@@ -153,157 +242,81 @@ function addAnywhereOptions<const Catalog extends CommandCatalog>(
   }
 }
 
-
-type CanonHelpMode = "text" | "full" | "json";
-
-interface DetectedHelp {
-  readonly mode: CanonHelpMode;
-  readonly routeWords: readonly string[];
-  readonly invalidMode?: string;
+function classifyCommanderError(error: CommanderError, commandId?: string): StructuredUsageFailure {
+  const code = error.code === "commander.excessArguments"
+    ? "extra-positional-argument"
+    : error.code === "commander.unknownOption"
+      ? "unknown-option"
+      : error.code === "commander.optionMissingArgument"
+        ? "missing-option-value"
+        : error.code === "commander.missingMandatoryOptionValue"
+          ? "missing-required-option"
+          : error.code === "commander.missingArgument"
+            ? "missing-positional-argument"
+            : error.code === "commander.unknownCommand"
+              ? "unknown-command"
+              : "invalid-arguments";
+  return {
+    code,
+    parserCode: error.code,
+    ...(commandId === undefined ? {} : { commandId }),
+  };
 }
 
-function declaredOptions<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
-): ReadonlyMap<string, CompiledField> {
-  const options = new Map<string, CompiledField>();
-  for (const command of product.commands) {
-    for (const field of command.fields) {
-      if ((field.kind === "option" || field.kind === "flag") && field.flag !== undefined) {
-        options.set(field.flag, field);
-        for (const alias of field.aliases ?? []) options.set(alias, field);
-      }
-    }
-  }
-  return options;
+function usageFailure(
+  failure: StructuredUsageFailure,
+  maxOutputBytes: number | undefined,
+): CliOutcome {
+  const message = failure.code === "extra-positional-argument"
+    ? "error: too many arguments\n"
+    : failure.code === "unknown-option"
+      ? "error: unknown option\n"
+      : failure.code === "missing-option-value"
+        ? "error: option value missing\n"
+        : failure.code === "missing-required-option"
+          ? `error: required option '${failure.option ?? "unknown"}' not specified\n`
+          : failure.code === "missing-positional-argument"
+            ? "error: required argument missing\n"
+            : failure.code === "unknown-command"
+              ? "error: unknown command\n"
+              : failure.code === "invalid-help-mode"
+                ? `Unknown help mode: ${failure.value ?? ""}\n`
+                : failure.code === "no-command"
+                  ? "No command selected.\n"
+                  : "error: invalid command arguments\n";
+  return failureResult("usage", message, 2, maxOutputBytes);
 }
 
-function detectHelp<const Catalog extends CommandCatalog>(
+export async function executeNodeCli<
+  const Catalog extends CommandCatalog,
+>(
   product: CompiledProduct<Catalog>,
   argv: readonly string[],
-): DetectedHelp | undefined {
-  const delimiter = argv.indexOf("--");
-  const end = delimiter === -1 ? argv.length : delimiter;
-  const options = declaredOptions(product);
-  const routeWords: string[] = [];
-  let detected: DetectedHelp | undefined;
-
-  for (let index = 0; index < end; index += 1) {
-    const token = argv[index];
-    if (token === undefined) continue;
-    if (token === "--help" || token === "-h" || token.startsWith("--help=")) {
-      const value = token.startsWith("--help=") ? token.slice("--help=".length) : undefined;
-      const validValue = value === undefined || value === "full" || value === "json";
-      detected ??= {
-        mode: value === "full" || value === "json" ? value : "text",
-        routeWords,
-        ...(validValue ? {} : { invalidMode: value }),
+  options: ExecuteNodeCliOptions = {},
+): Promise<NodeCliExecution<Catalog>> {
+  const projection = composeCommandProjection(product, options.legacyRoutes ?? []);
+  const parsedHelp = parseHelpMode(projection, argv, options.helpFormat);
+  if (parsedHelp !== undefined) {
+    if (parsedHelp.invalidMode !== undefined) {
+      return {
+        status: "failure",
+        failureKind: "usage",
+        usageFailure: { code: "invalid-help-mode", value: parsedHelp.invalidMode },
       };
-      continue;
     }
-    if (token === "--") break;
-
-    const flag = token.startsWith("-") ? token.split("=", 1)[0] : undefined;
-    const declaration = flag === undefined ? undefined : options.get(flag);
-    const hasInlineValue = token.includes("=");
-    if (declaration?.kind === "option" && !hasInlineValue) {
-      const next = argv[index + 1];
-      if (declaration.valueArity !== "optional" || (
-        next !== undefined && (!next.startsWith("-") || /^-\d/u.test(next))
-      )) {
-        index += 1;
-        continue;
-      }
-    }
-    if (token.startsWith("-")) continue;
-    routeWords.push(token);
+    return {
+      status: "help",
+      mode: parsedHelp.mode,
+      projection: projectHelp(projection, parsedHelp),
+    };
   }
 
-  return detected === undefined
-    ? undefined
-    : { ...detected, routeWords: Object.freeze([...routeWords]) };
-}
-
-function routeCandidates<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
-): readonly (readonly string[])[] {
-  const candidates = new Map<string, readonly string[]>();
-  for (const command of product.commands) {
-    for (let length = 1; length <= command.route.length; length += 1) {
-      const route = command.route.slice(0, length);
-      candidates.set(route.join("\u0000"), route);
-    }
-  }
-  return [...candidates.values()].sort((left, right) =>
-    right.length - left.length || (left.join(" ") < right.join(" ") ? -1 : left.join(" ") > right.join(" ") ? 1 : 0),
-  );
-}
-
-function helpRequest<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
-  words: readonly string[],
-  mode: Exclude<CanonHelpMode, "json">,
-): HelpRequest {
-  const routes = routeCandidates(product);
-  for (let start = 0; start < words.length; start += 1) {
-    for (const route of routes) {
-      if (route.every((segment, offset) => words[start + offset] === segment)) {
-        const command = product.commands.find((candidate) =>
-          candidate.route.length === route.length && candidate.route.every((segment, index) => route[index] === segment),
-        );
-        return command === undefined
-          ? { kind: "route", route, mode }
-          : { kind: "command", commandId: command.id, mode };
-      }
-    }
-  }
-  return { kind: "root", mode };
-}
-
-function helpDiscoveryRoute<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
-  request: HelpRequest,
-): readonly string[] | undefined {
-  if (request.kind === "route") return request.route;
-  if (request.kind === "command") {
-    return product.commands.find((command) => command.id === request.commandId)?.route;
-  }
-  return undefined;
-}
-
-export async function runNodeCli<const Catalog extends CommandCatalog, DomainError = never>(
-  product: CompiledProduct<Catalog>,
-  argv: readonly string[],
-  options: RunNodeCliOptions<DomainError> = {},
-): Promise<CliResult> {
-  const detectedHelp = detectHelp(product, argv);
-  if (detectedHelp !== undefined) {
-    if (detectedHelp.invalidMode !== undefined) {
-      return failureResult("usage", `Unknown help mode: ${detectedHelp.invalidMode}\n`, 2, options.maxOutputBytes);
-    }
-    const selectedMode = options.helpFormat ?? detectedHelp.mode;
-    const request = helpRequest(product, detectedHelp.routeWords, selectedMode === "json" ? "text" : selectedMode);
-    if (selectedMode === "json") {
-      const route = helpDiscoveryRoute(product, request);
-      return toCliResult(jsonOutput(projectDiscovery(product, route === undefined ? {} : { route }), outputPolicyOptions(options.maxOutputBytes)));
-    }
-    return toCliResult(textOutput(renderHelp(product, request), outputPolicyOptions(options.maxOutputBytes)));
-  }
-
-  let stdout = "";
-  let stderr = "";
-  let invocation: Promise<CliResult> | undefined;
+  let invocation: Promise<NodeCliExecution<Catalog>> | undefined;
   const program = new Command(product.name);
   program.helpOption(false);
   program.addHelpCommand(false);
   program.exitOverride();
-  program.configureOutput({
-    writeOut: (value: string) => {
-      stdout += value;
-    },
-    writeErr: (value: string) => {
-      stderr += value;
-    },
-  });
+  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
   program.enablePositionalOptions();
   addAnywhereOptions(program, product);
   const root: RouteNode = { command: program, children: new Map() };
@@ -350,14 +363,22 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
               : value === undefined;
           });
           if (missingRequiredOption !== undefined) {
-            return failureResult("usage", `error: required option '${missingRequiredOption.flag}' not specified\n`, 2, options.maxOutputBytes);
+            return {
+              status: "failure",
+              failureKind: "usage",
+              usageFailure: {
+                code: "missing-required-option",
+                commandId: compiled.id,
+                ...(missingRequiredOption.flag === undefined ? {} : { option: missingRequiredOption.flag }),
+              },
+            };
           }
 
           let decoded: Readonly<Record<string, unknown>>;
           try {
             decoded = await decodeInput(compiled, raw);
           } catch (error) {
-            return failureResult("validation", `INVALID_INPUT: ${error instanceof Error ? error.message : String(error)}\n`, 2, options.maxOutputBytes);
+            return { status: "failure", failureKind: "validation", error };
           }
 
           const handler = product.handlers[compiled.id as keyof Catalog] as (
@@ -367,22 +388,17 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
           try {
             rawResult = await handler(decoded);
           } catch (error) {
-            const adapter = options.domainErrorAdapter;
-            if (adapter?.is(error) === true) {
-              const mapped = adapter.map(error);
-              return failureResult("domain", mapped.output, mapped.exitCode, options.maxOutputBytes, mapped.stream);
-            }
-            throw error;
+            return { status: "failure", failureKind: "handler-error", error };
           }
-          let result: unknown;
+          let result;
           try {
             result = await compiled.definition.result.parseAsync(rawResult);
           } catch (error) {
-            return failureResult("handler-result", `INVALID_HANDLER_RESULT: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+            return { status: "failure", failureKind: "handler-result", error };
           }
-          return toCliResult(jsonOutput(result, outputPolicyOptions(options.maxOutputBytes)));
+          return { status: "success", commandId: compiled.id, result };
         } catch (error) {
-          return failureResult("unexpected", `UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+          return { status: "failure", failureKind: "handler-error", error };
         }
       })();
       await invocation;
@@ -393,13 +409,89 @@ export async function runNodeCli<const Catalog extends CommandCatalog, DomainErr
     await program.parseAsync(["node", product.name, ...argv]);
   } catch (error) {
     if (error instanceof CommanderError) {
-      if (error.code === "commander.helpDisplayed") return toCliResult(textOutput(stdout, outputPolicyOptions(options.maxOutputBytes)));
-      return failureResult("usage", stderr, error.exitCode === 0 ? 1 : error.exitCode, options.maxOutputBytes);
+      if (error.code === "commander.helpDisplayed") {
+        const rootHelp = parseHelpMode(projection, ["--help"], options.helpFormat);
+        if (rootHelp !== undefined) {
+          return { status: "help", mode: rootHelp.mode, projection: projectHelp(projection, rootHelp) };
+        }
+      }
+      return { status: "failure", failureKind: "usage", usageFailure: classifyCommanderError(error) };
     }
-    return failureResult("unexpected", `${stderr}UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+    return { status: "failure", failureKind: "handler-error", error };
   }
 
   return invocation === undefined
-    ? failureResult("usage", `${stderr}No command selected.\n`, 2, options.maxOutputBytes)
+    ? {
+        status: "failure",
+        failureKind: "usage",
+        usageFailure: { code: "no-command", parserCode: "canon.noCommandSelected" },
+      }
     : await invocation;
+}
+
+export function projectNodeCliExecution<
+  DomainError = never,
+  Catalog extends CommandCatalog = CommandCatalog,
+>(
+  execution: NodeCliExecution<Catalog>,
+  options: ProjectNodeCliExecutionOptions<DomainError, Catalog> = {},
+): CliResult {
+  const maxOutputBytes = options.maxOutputBytes;
+  if (execution.status === "success") {
+    const outcome = options.terminalAdapter?.success?.(execution)
+      ?? jsonOutput(execution.result, outputPolicyOptions(maxOutputBytes));
+    return toCliResult(boundedOutcome(outcome, maxOutputBytes));
+  }
+  if (execution.status === "help") {
+    const outcome = typeof execution.projection === "string"
+      ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
+      : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes));
+    return toCliResult(outcome);
+  }
+
+  if (execution.failureKind === "usage") {
+    const outcome = options.terminalAdapter?.usageFailure?.(execution.usageFailure)
+      ?? usageFailure(execution.usageFailure, maxOutputBytes);
+    return toCliResult(boundedOutcome(outcome, maxOutputBytes));
+  }
+  if (execution.failureKind === "validation") {
+    return toCliResult(failureResult(
+      "validation",
+      `INVALID_INPUT: ${errorMessage(execution.error)}\n`,
+      2,
+      maxOutputBytes,
+    ));
+  }
+  if (execution.failureKind === "handler-result") {
+    return toCliResult(failureResult(
+      "handler-result",
+      `INVALID_HANDLER_RESULT: ${errorMessage(execution.error)}\n`,
+      1,
+      maxOutputBytes,
+    ));
+  }
+
+  const adapter = options.domainErrorAdapter;
+  if (adapter?.is(execution.error) === true) {
+    const mapped = adapter.map(execution.error);
+    return toCliResult(failureResult("domain", mapped.output, mapped.exitCode, maxOutputBytes, mapped.stream));
+  }
+  return toCliResult(failureResult(
+    "unexpected",
+    `UNEXPECTED: ${errorMessage(execution.error)}\n`,
+    1,
+    maxOutputBytes,
+  ));
+}
+
+export async function runNodeCli<
+  const Catalog extends CommandCatalog,
+  DomainError = never,
+>(
+  product: CompiledProduct<Catalog>,
+  argv: readonly string[],
+  options: RunNodeCliOptions<DomainError, Catalog> = {},
+): Promise<CliResult> {
+  const execution = await executeNodeCli(product, argv, options);
+  return projectNodeCliExecution(execution, options);
 }

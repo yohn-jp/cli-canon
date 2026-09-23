@@ -1,4 +1,5 @@
 import * as z from "zod";
+import type { FieldDefinition } from "../command/model.js";
 import type { ProjectionCommandSource } from "./source.js";
 
 export type SchemaProjectionCompleteness = "complete" | "structural-only";
@@ -22,7 +23,12 @@ export interface CommandSchemaProjection {
 }
 
 export interface SchemaProjectionProduct {
-  readonly commands: readonly ProjectionCommandSource[];
+  readonly commands: readonly (ProjectionCommandSource & {
+    readonly definition: {
+      readonly input: Readonly<Record<string, FieldDefinition>>;
+      readonly result: z.ZodType;
+    };
+  })[];
 }
 
 const JSON_SCHEMA_CHECKS = [
