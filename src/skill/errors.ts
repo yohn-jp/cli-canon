@@ -8,7 +8,7 @@ interface SkillConstructionIssueBase {
 
 export type SkillConstructionIssue =
   | (SkillConstructionIssueBase & {
-    readonly code: "UNKNOWN_COMMAND_REFERENCE" | "PRIVATE_COMMAND_REFERENCE";
+    readonly code: "UNKNOWN_COMMAND_REFERENCE" | "PRIVATE_COMMAND_REFERENCE" | "INVALID_COMMAND_BINDING";
     readonly stepIndex: number;
     readonly commandId: string;
   })
@@ -20,6 +20,9 @@ export type SkillConstructionIssue =
   | (SkillConstructionIssueBase & {
     readonly code: "SKILL_DELEGATE_CYCLE";
     readonly delegateSkillId: string;
+  })
+  | (SkillConstructionIssueBase & {
+    readonly code: "INVALID_SKILL_OUTPUT_BUDGET";
   });
 
 export class SkillConstructionError extends Error {
