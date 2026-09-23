@@ -35,6 +35,12 @@ export interface DiscoveryRequest {
   readonly route?: readonly string[];
 }
 
+export interface DiscoveryProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
+  readonly name: string;
+  readonly packageMetadata?: ProductPackageIdentity;
+  readonly commands: CompiledProduct<Catalog>["commands"];
+}
+
 function compareCommands(
   left: { readonly route: readonly string[]; readonly id: string },
   right: { readonly route: readonly string[]; readonly id: string },
@@ -45,7 +51,7 @@ function compareCommands(
 }
 
 export function projectDiscovery<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: DiscoveryProjectionProduct<Catalog>,
   request: DiscoveryRequest = {},
 ): ProductDiscovery {
   const commands = product.commands
