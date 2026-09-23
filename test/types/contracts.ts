@@ -8,7 +8,12 @@ import {
   positional,
   rawArgs,
   type CommandId,
+  type CliIO,
+  type DomainErrorAdapter,
+  type CliOutcome,
+  jsonOutput,
 } from "../../src/index.js";
+import { runNodeCli } from "../../src/node/index.js";
 
 const commands = defineCommands({
   "document.render": {
@@ -50,6 +55,34 @@ const handlers = bindHandlers(commands)({
 });
 
 compileProduct({ name: "fixture", commands, handlers });
+interface ProductDomainError {
+  readonly code: "DOCUMENT_LOCKED";
+  readonly message: string;
+}
+
+const domainErrorAdapter: DomainErrorAdapter<ProductDomainError> = {
+  is: (error): error is ProductDomainError => typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "DOCUMENT_LOCKED"
+    && "message" in error
+    && typeof error.message === "string",
+  map: (error) => ({ exitCode: 8, stream: "stderr", output: `${error.code}: ${error.message}\n` }),
+};
+void runNodeCli(compileProduct({ name: "fixture", commands, handlers }), [], { domainErrorAdapter });
+
+const output: CliOutcome = jsonOutput({ ok: true }, { maxBytes: 64 });
+const cliIO: CliIO = { writeStdout: (_value) => {}, writeStderr: (_value) => {} };
+void output;
+void cliIO;
+
+const invalidDomainErrorAdapter: DomainErrorAdapter<ProductDomainError> = {
+  is: domainErrorAdapter.is,
+  // @ts-expect-error product error mappings must include a numeric process exit code.
+  map: () => ({ exitCode: "failure", stream: "stderr", output: "failed\n" }),
+};
+void invalidDomainErrorAdapter;
+
 
 bindHandlers(commands)({
   // @ts-expect-error result contract is checked per command.

@@ -8,6 +8,8 @@ import {
   flag,
   option,
   positional,
+  OutputPolicyError,
+  utf8ByteLength,
 } from "../../dist/index.js";
 import {
   defineSkills,
@@ -112,6 +114,29 @@ test("Skill JSON projection is deterministic, valid, and keeps long content inta
   const json = renderSkillJson(withLongContent);
   assert.deepEqual(JSON.parse(json), withLongContent);
   assert.equal(renderSkillJson(withLongContent), json);
+});
+
+test("bounded Skill text and JSON use the shared byte budget without truncation", () => {
+  const projected = projectSkill(fixture(), "document.policy");
+  const text = renderSkillText(projected);
+  const json = renderSkillJson(projected);
+  const textBytes = Buffer.byteLength(text, "utf8");
+  const jsonBytes = Buffer.byteLength(json, "utf8");
+
+  assert.equal(renderSkillText(projected, { maxBytes: textBytes }), text);
+  assert.throws(
+    () => renderSkillText(projected, { maxBytes: textBytes - 1 }),
+    (error) => error instanceof OutputPolicyError && error.failureKind === "budget",
+  );
+
+  const boundedJson = renderSkillJson(projected, { maxBytes: jsonBytes });
+  assert.equal(boundedJson, json);
+  assert.deepEqual(JSON.parse(boundedJson), projected);
+  assert.throws(
+    () => renderSkillJson(projected, { maxBytes: jsonBytes - 1 }),
+    (error) => error instanceof OutputPolicyError && error.failureKind === "budget",
+  );
+  assert.ok(utf8ByteLength(boundedJson) <= jsonBytes);
 });
 
 test("Skill compilation rejects unknown command references at construction", () => {

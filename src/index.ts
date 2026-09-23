@@ -8,3 +8,4 @@ export * from "./projection/help.js";
 export * from "./projection/discovery.js";
 export * from "./skill/index.js";
 export * from "./path/index.js";
+export * from "./output/index.js";
