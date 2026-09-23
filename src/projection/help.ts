@@ -1,4 +1,5 @@
-import type { CompiledCommand, CompiledField } from "../command/compiler.js";
+import type { CompiledField } from "../command/compiler.js";
+import type { ProjectionCommandSource, ProjectionProductSource } from "./source.js";
 
 export type HelpMode = "text" | "full";
 
@@ -7,10 +8,7 @@ export type HelpRequest =
   | { readonly kind: "route"; readonly route: readonly string[]; readonly mode?: HelpMode }
   | { readonly kind: "command"; readonly commandId: string; readonly mode?: HelpMode };
 
-export interface HelpProjectionProduct {
-  readonly name: string;
-  readonly commands: readonly CompiledCommand[];
-}
+export interface HelpProjectionProduct extends ProjectionProductSource {}
 
 function fieldSyntax(field: CompiledField): string {
   if (field.kind === "flag") return `[${[...(field.aliases ?? []), field.flag].join(", ")}]`;
@@ -28,7 +26,7 @@ function fieldSyntax(field: CompiledField): string {
   return "[-- <args...>]";
 }
 
-function commandUsage(productName: string, command: CompiledCommand): string {
+function commandUsage(productName: string, command: ProjectionCommandSource): string {
   return [productName, ...command.route, ...command.fields.map(fieldSyntax)].join(" ");
 }
 
@@ -38,7 +36,7 @@ function helpFooter(): string {
 
 function sortedCommands(
   product: HelpProjectionProduct,
-): readonly CompiledCommand[] {
+): readonly ProjectionCommandSource[] {
   return [...product.commands].sort((left, right) => {
     const leftRoute = left.route.join(" ");
     const rightRoute = right.route.join(" ");
@@ -46,7 +44,7 @@ function sortedCommands(
   });
 }
 
-function renderFields(command: CompiledCommand): string[] {
+function renderFields(command: ProjectionCommandSource): string[] {
   const positionals = command.fields.filter((field) => field.kind === "positional" || field.kind === "raw-args");
   const options = command.fields.filter((field) => field.kind === "option" || field.kind === "flag");
   const lines: string[] = [];
@@ -67,7 +65,7 @@ function renderFields(command: CompiledCommand): string[] {
   return lines;
 }
 
-function renderCommandHelp(command: CompiledCommand, productName: string, mode: HelpMode): string {
+function renderCommandHelp(command: ProjectionCommandSource, productName: string, mode: HelpMode): string {
   const lines = [`Usage: ${commandUsage(productName, command)}`, "", command.summary];
   if (mode === "full") {
     if (command.description !== undefined) lines.push("", command.description);
@@ -84,8 +82,8 @@ function renderCommandHelp(command: CompiledCommand, productName: string, mode: 
 function routeChildren(
   product: HelpProjectionProduct,
   route: readonly string[],
-): readonly { readonly segment: string; readonly command: CompiledCommand }[] {
-  const children = new Map<string, CompiledCommand>();
+): readonly { readonly segment: string; readonly command: ProjectionCommandSource }[] {
+  const children = new Map<string, ProjectionCommandSource>();
   for (const command of sortedCommands(product)) {
     if (route.length >= command.route.length || !route.every((segment, index) => command.route[index] === segment)) continue;
     const segment = command.route[route.length];
