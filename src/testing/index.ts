@@ -1,3 +1,5 @@
+export * from "./node-test-tap.js";
+
 export type CertificationLaneId = "source" | "built" | "packed";
 
 export interface CertificationScenario<Context, Expected, Input = undefined, CommandId extends string = string> {
