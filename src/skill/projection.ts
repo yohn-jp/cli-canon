@@ -3,6 +3,9 @@ import type { CommandCatalog } from "../command/model.js";
 import { renderHelp } from "../projection/help.js";
 import type { CompiledSkillStep, CompiledSkills, SkillCommandId } from "./compiler.js";
 import type { SkillCatalog, SkillId } from "./model.js";
+import type { JsonOutputPolicyOptions, OutputPolicyOptions } from "../output/model.js";
+import { OutputPolicyError } from "../output/errors.js";
+import { jsonOutput, textOutput } from "../output/policy.js";
 
 export interface SkillProjectionProduct<
   Catalog extends CommandCatalog,
@@ -96,7 +99,15 @@ export function projectSkills<
   return product.skills.map((skill) => projectSkill(product, skill.id));
 }
 
-export function renderSkillText(skill: ProjectedSkill): string {
+function requireOutput(output: ReturnType<typeof textOutput>): string {
+  if (output.status === "success") return output.output;
+  if (output.failureKind === "serialization" || output.failureKind === "budget") {
+    throw new OutputPolicyError(output.failureKind, output.output.trimEnd() || output.failureKind);
+  }
+  throw new Error(`unexpected Skill output failure: ${output.failureKind}`);
+}
+
+export function renderSkillText(skill: ProjectedSkill, options: OutputPolicyOptions = {}): string {
   const lines = [skill.summary, ""];
   for (const step of skill.steps) {
     if (step.kind === "prose") {
@@ -116,9 +127,12 @@ export function renderSkillText(skill: ProjectedSkill): string {
     }
     lines.push(`Help: ${step.help.commandId}`, "");
   }
-  return `${lines.join("\n").trimEnd()}\n`;
+  return requireOutput(textOutput(`${lines.join("\n").trimEnd()}\n`, options));
 }
 
-export function renderSkillJson(skill: ProjectedSkill): string {
-  return `${JSON.stringify(skill, null, 2)}\n`;
+export function renderSkillJson(skill: ProjectedSkill, options: JsonOutputPolicyOptions = {}): string {
+  const policy = options.space === undefined
+    ? { ...options, space: 2 }
+    : options;
+  return requireOutput(jsonOutput(skill, policy));
 }

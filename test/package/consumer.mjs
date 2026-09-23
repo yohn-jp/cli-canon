@@ -71,7 +71,7 @@ try {
   writeFileSync(
     path.join(consumer, "consumer.ts"),
     `import * as z from "zod";
-import { bindHandlers, compileProduct, defineCommands, option, positional, type CommandId } from "@yohn-jp/cli-canon";
+import { bindHandlers, compileProduct, defineCommands, jsonOutput, option, positional, type CliIO, type CliOutcome, type CommandId, type DomainErrorAdapter } from "@yohn-jp/cli-canon";
 import { runNodeCli } from "@yohn-jp/cli-canon/node";
 
 const commands = defineCommands({
@@ -103,6 +103,19 @@ void validId;
 // @ts-expect-error IDs are inferred from the declarations in the packed types.
 const invalidId: Id = "example.unknown";
 void invalidId;
+interface ExampleDomainError { readonly code: "EXAMPLE_DENIED"; readonly message: string }
+const domainErrorAdapter: DomainErrorAdapter<ExampleDomainError> = {
+  is: (error): error is ExampleDomainError => typeof error === "object"
+    && error !== null && "code" in error && error.code === "EXAMPLE_DENIED"
+    && "message" in error && typeof error.message === "string",
+  map: (error) => ({ exitCode: 9, stream: "stderr", output: error.message + "\\n" }),
+};
+void runNodeCli(product, ["echo", "typed package"], { domainErrorAdapter });
+const io: CliIO = { writeStdout: (_output) => {}, writeStderr: (_output) => {} };
+const outcome: CliOutcome = jsonOutput({ ok: true }, { maxBytes: 64 });
+void io;
+void outcome;
+
 `,
   );
 
@@ -115,6 +128,28 @@ import { certificationOracle } from "./fixture-oracle.mjs";
 import { runCertificationScenario } from "./fixture-scenario.mjs";
 
 assert.deepEqual(await runCertificationScenario(api, node), certificationOracle);
+const expectedJson = '{"message":"雪"}\\n';
+const jsonBytes = Buffer.byteLength(expectedJson, "utf8");
+const output = api.jsonOutput({ message: "雪" }, { maxBytes: jsonBytes });
+assert.deepEqual(output, {
+  status: "success",
+  stream: "stdout",
+  output: expectedJson,
+  exitCode: 0,
+});
+assert.deepEqual(api.jsonOutput({ message: "雪" }, { maxBytes: jsonBytes - 1 }), {
+  status: "failure",
+  stream: "stderr",
+  output: "",
+  exitCode: 1,
+  failureKind: "budget",
+});
+const writes = [];
+api.writeCliOutcome(output, {
+  writeStdout: (text) => writes.push(["stdout", text]),
+  writeStderr: (text) => writes.push(["stderr", text]),
+});
+assert.deepEqual(writes, [["stdout", expectedJson]]);
 console.log("packed consumer verified");
 `,
   );

@@ -3,18 +3,31 @@ import type { CompiledCommand, CompiledField, CompiledProduct } from "../command
 import type { CommandCatalog, FieldDefinition } from "../command/model.js";
 import { projectDiscovery } from "../projection/discovery.js";
 import { renderHelp, type HelpRequest } from "../projection/help.js";
+import type { DomainErrorAdapter } from "../output/model.js";
+import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
+import type { CliResult } from "../output/model.js";
 
-export type CliFailureKind = "usage" | "validation" | "handler-result" | "unexpected";
+export type { CliFailureKind, CliResult } from "../output/model.js";
 
-export interface CliResult {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly failureKind?: CliFailureKind;
+export interface RunNodeCliOptions<DomainError = never> {
+  readonly helpFormat?: "text" | "full" | "json";
+  readonly maxOutputBytes?: number;
+  readonly domainErrorAdapter?: DomainErrorAdapter<DomainError>;
 }
 
-export interface RunNodeCliOptions {
-  readonly helpFormat?: "text" | "full" | "json";
+function outputPolicyOptions(maxOutputBytes: number | undefined): { readonly maxBytes?: number } {
+  return maxOutputBytes === undefined ? {} : { maxBytes: maxOutputBytes };
+}
+
+function failureResult(
+  failureKind: Parameters<typeof cliFailure>[0],
+  output: string,
+  exitCode: number,
+  maxOutputBytes: number | undefined,
+  stream: "stdout" | "stderr" = "stderr",
+): CliResult {
+  const bounded = textOutput(output, outputPolicyOptions(maxOutputBytes));
+  return toCliResult(bounded.status === "success" ? cliFailure(failureKind, bounded.output, exitCode, stream) : bounded);
 }
 
 function camelcase(value: string): string {
@@ -140,11 +153,6 @@ function addAnywhereOptions<const Catalog extends CommandCatalog>(
   }
 }
 
-function stringifyResult(value: unknown): string {
-  if (value === undefined) return "";
-  const json = JSON.stringify(value);
-  return json === undefined ? "" : `${json}\n`;
-}
 
 type CanonHelpMode = "text" | "full" | "json";
 
@@ -262,32 +270,23 @@ function helpDiscoveryRoute<const Catalog extends CommandCatalog>(
   return undefined;
 }
 
-export async function runNodeCli<const Catalog extends CommandCatalog>(
+export async function runNodeCli<const Catalog extends CommandCatalog, DomainError = never>(
   product: CompiledProduct<Catalog>,
   argv: readonly string[],
-  options: RunNodeCliOptions = {},
+  options: RunNodeCliOptions<DomainError> = {},
 ): Promise<CliResult> {
   const detectedHelp = detectHelp(product, argv);
   if (detectedHelp !== undefined) {
     if (detectedHelp.invalidMode !== undefined) {
-      return {
-        exitCode: 2,
-        stdout: "",
-        stderr: `Unknown help mode: ${detectedHelp.invalidMode}\n`,
-        failureKind: "usage",
-      };
+      return failureResult("usage", `Unknown help mode: ${detectedHelp.invalidMode}\n`, 2, options.maxOutputBytes);
     }
     const selectedMode = options.helpFormat ?? detectedHelp.mode;
     const request = helpRequest(product, detectedHelp.routeWords, selectedMode === "json" ? "text" : selectedMode);
     if (selectedMode === "json") {
       const route = helpDiscoveryRoute(product, request);
-      return {
-        exitCode: 0,
-        stdout: `${JSON.stringify(projectDiscovery(product, route === undefined ? {} : { route }))}\n`,
-        stderr: "",
-      };
+      return toCliResult(jsonOutput(projectDiscovery(product, route === undefined ? {} : { route }), outputPolicyOptions(options.maxOutputBytes)));
     }
-    return { exitCode: 0, stdout: renderHelp(product, request), stderr: "" };
+    return toCliResult(textOutput(renderHelp(product, request), outputPolicyOptions(options.maxOutputBytes)));
   }
 
   let stdout = "";
@@ -347,36 +346,32 @@ export async function runNodeCli<const Catalog extends CommandCatalog>(
           try {
             decoded = await decodeInput(compiled, raw);
           } catch (error) {
-            return {
-              exitCode: 2,
-              stdout: "",
-              stderr: `INVALID_INPUT: ${error instanceof Error ? error.message : String(error)}\n`,
-              failureKind: "validation" as const,
-            };
+            return failureResult("validation", `INVALID_INPUT: ${error instanceof Error ? error.message : String(error)}\n`, 2, options.maxOutputBytes);
           }
 
           const handler = product.handlers[compiled.id as keyof Catalog] as (
             input: Readonly<Record<string, unknown>>,
           ) => unknown;
-          const rawResult = await handler(decoded);
+          let rawResult: unknown;
           try {
-            const result = await compiled.definition.result.parseAsync(rawResult);
-            return { exitCode: 0, stdout: stringifyResult(result), stderr: "" };
+            rawResult = await handler(decoded);
           } catch (error) {
-            return {
-              exitCode: 1,
-              stdout: "",
-              stderr: `INVALID_HANDLER_RESULT: ${error instanceof Error ? error.message : String(error)}\n`,
-              failureKind: "handler-result" as const,
-            };
+            const adapter = options.domainErrorAdapter;
+            if (adapter?.is(error) === true) {
+              const mapped = adapter.map(error);
+              return failureResult("domain", mapped.output, mapped.exitCode, options.maxOutputBytes, mapped.stream);
+            }
+            throw error;
           }
+          let result: unknown;
+          try {
+            result = await compiled.definition.result.parseAsync(rawResult);
+          } catch (error) {
+            return failureResult("handler-result", `INVALID_HANDLER_RESULT: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
+          }
+          return toCliResult(jsonOutput(result, outputPolicyOptions(options.maxOutputBytes)));
         } catch (error) {
-          return {
-            exitCode: 1,
-            stdout: "",
-            stderr: `UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`,
-            failureKind: "unexpected" as const,
-          };
+          return failureResult("unexpected", `UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
         }
       })();
       await invocation;
@@ -387,23 +382,13 @@ export async function runNodeCli<const Catalog extends CommandCatalog>(
     await program.parseAsync(["node", product.name, ...argv]);
   } catch (error) {
     if (error instanceof CommanderError) {
-      if (error.code === "commander.helpDisplayed") return { exitCode: 0, stdout, stderr };
-      return {
-        exitCode: error.exitCode === 0 ? 1 : error.exitCode,
-        stdout,
-        stderr,
-        failureKind: "usage",
-      };
+      if (error.code === "commander.helpDisplayed") return toCliResult(textOutput(stdout, outputPolicyOptions(options.maxOutputBytes)));
+      return failureResult("usage", stderr, error.exitCode === 0 ? 1 : error.exitCode, options.maxOutputBytes);
     }
-    return {
-      exitCode: 1,
-      stdout,
-      stderr: `${stderr}UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`,
-      failureKind: "unexpected",
-    };
+    return failureResult("unexpected", `${stderr}UNEXPECTED: ${error instanceof Error ? error.message : String(error)}\n`, 1, options.maxOutputBytes);
   }
 
   return invocation === undefined
-    ? { exitCode: 2, stdout, stderr: `${stderr}No command selected.\n`, failureKind: "usage" }
+    ? failureResult("usage", `${stderr}No command selected.\n`, 2, options.maxOutputBytes)
     : await invocation;
 }
