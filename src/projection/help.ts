@@ -10,7 +10,7 @@ export type HelpRequest =
 
 export interface HelpProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
   readonly name: string;
-  readonly commands: HelpProjectionProduct<Catalog>["commands"];
+  readonly commands: CompiledProduct<Catalog>["commands"];
 }
 
 function fieldSyntax(field: CompiledField): string {
