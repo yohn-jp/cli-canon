@@ -77,6 +77,10 @@ try {
   for (const filename of ["failure.test.mjs", "passing.test.mjs"]) {
     copyFileSync(path.join(testDirectory, "..", "fixtures", "node-test", filename), path.join(consumer, filename));
   }
+  copyFileSync(
+    path.join(testDirectory, "node-test-suzukuri-producer.mjs"),
+    path.join(consumer, "node-test-suzukuri-producer.mjs"),
+  );
   copyFileSync(path.join(testDirectory, "root-import-purity.mjs"), path.join(consumer, "root-import-purity.mjs"));
 
   writeFileSync(
@@ -245,11 +249,12 @@ void packedTapProjection.failures;
     path.join(consumer, "consumer.mjs"),
     `import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import * as api from "@yohn-jp/cli-canon";
 import * as node from "@yohn-jp/cli-canon/node";
 import packageMetadata from "./package.json" with { type: "json" };
-import { certifyScenarios, projectNodeTestTap } from "@yohn-jp/cli-canon/testing";
+import { certifyScenarios } from "@yohn-jp/cli-canon/testing";
 import { createCertificationScenario } from "./fixture-scenario.mjs";
 
 assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
@@ -259,47 +264,49 @@ await certifyScenarios(
   [{ id: "packed", context: { api, node } }],
   (actual, expected) => assert.deepEqual(actual, expected),
 );
-function runNodeTestFile(filename) {
-  const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", path.join(process.cwd(), filename)], {
+const suzukuriCli = ${JSON.stringify(path.join(root, "node_modules", "suzukuri", "dist", "cli-entry.js"))};
+function runSuzukuriTest(filename, expectedExitCode) {
+  const fixturePath = path.join(process.cwd(), filename);
+  const configPath = path.join(process.cwd(), filename + ".commands.json");
+  writeFileSync(configPath, JSON.stringify({
+    schemaVersion: 1,
+    commands: {
+      test: {
+        argv: ["node", path.join(process.cwd(), "node-test-suzukuri-producer.mjs"), fixturePath],
+        adapter: "vitest",
+        projection: "test-result",
+        reuse: "never",
+        view: "test-result-failures",
+      },
+    },
+  }));
+  const result = spawnSync(process.execPath, [suzukuriCli, "test", "--config", configPath], {
+    cwd: process.cwd(),
     encoding: "utf8",
   });
   assert.equal(result.error, undefined);
-  assert.notEqual(result.status, null);
-  return projectNodeTestTap(result.stdout, result.status ?? -1);
+  assert.equal(result.signal, null);
+  assert.equal(result.status, expectedExitCode, result.stdout + result.stderr);
+  return JSON.parse(result.stdout);
 }
-const packedFailure = runNodeTestFile("failure.test.mjs");
+const packedFailure = runSuzukuriTest("failure.test.mjs", 1);
 assert.equal(packedFailure.status, "failed");
-assert.equal(packedFailure.exitCode, 1);
-assert.deepEqual(packedFailure.counts, {
-  tests: 1,
-  suites: 0,
-  pass: 0,
-  fail: 1,
-  cancelled: 0,
-  skipped: 0,
-  todo: 0,
-});
+assert.deepEqual(packedFailure.counts, { total: 1, passed: 0, failed: 1, skipped: 0 });
 assert.equal(packedFailure.failures[0]?.name, "projection preserves assertion diagnostics");
 assert.equal(packedFailure.failures[0]?.file, path.join(process.cwd(), "failure.test.mjs"));
-assert.equal(packedFailure.failures[0]?.line, 3);
-assert.equal(packedFailure.failures[0]?.column, 1);
+assert.deepEqual(packedFailure.failures[0]?.location, { start: { line: 3, column: 1 } });
 assert.match(packedFailure.failures[0]?.message, /Expected values to be strictly equal/u);
-assert.equal(packedFailure.failures[0]?.expected, "expected");
-assert.equal(packedFailure.failures[0]?.actual, "actual");
+assert.match(packedFailure.failures[0]?.assertion, /Expected values to be strictly equal/u);
 assert.match(packedFailure.failures[0]?.stack, /failure\.test\.mjs:3:/u);
-assert.ok(packedFailure.failures[0]?.diagnostics?.includes("expected: 'expected'"));
-assert.ok(packedFailure.failures[0]?.diagnostics?.includes("actual: 'actual'"));
-const packedPass = runNodeTestFile("passing.test.mjs");
+assert.ok(packedFailure.failures[0]?.diagnostic?.includes("expected: 'expected'"));
+assert.ok(packedFailure.failures[0]?.diagnostic?.includes("actual: 'actual'"));
+const packedPass = runSuzukuriTest("passing.test.mjs", 0);
 assert.equal(packedPass.status, "passed");
-assert.equal(packedPass.exitCode, 0);
 assert.deepEqual(packedPass.counts, {
-  tests: 2,
-  suites: 0,
-  pass: 2,
-  fail: 0,
-  cancelled: 0,
+  total: 2,
+  passed: 2,
+  failed: 0,
   skipped: 0,
-  todo: 0,
 });
 assert.deepEqual(packedPass.failures, []);
 const expectedJson = '{"message":"雪"}\\n';

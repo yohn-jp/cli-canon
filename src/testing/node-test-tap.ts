@@ -34,8 +34,117 @@ export interface NodeTestTapProjection {
 const SUMMARY_KEYS = ["tests", "suites", "pass", "fail", "cancelled", "skipped", "todo"] as const;
 type SummaryKey = (typeof SUMMARY_KEYS)[number];
 
-const TAP_POINT = /^( *)(not ok|ok)\s+(\d+)(?:\s+-\s+(.*?))?(?:\s+#\s*(SKIP|TODO|CANCELLED)(?:\s+.*)?)?\s*$/u;
 const TAP_SUMMARY = /^# (tests|suites|pass|fail|cancelled|skipped|todo) (\d+)$/u;
+
+interface TapPoint {
+  readonly indentation: number;
+  readonly result: "ok" | "not ok";
+  readonly number: string;
+  readonly name?: string;
+  readonly directive?: string;
+}
+
+function isTapWhitespace(code: number): boolean {
+  return (
+    code === 0x0009 ||
+    code === 0x000a ||
+    code === 0x000b ||
+    code === 0x000c ||
+    code === 0x000d ||
+    code === 0x0020 ||
+    code === 0x00a0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000 ||
+    code === 0xfeff
+  );
+}
+
+function skipTapWhitespace(source: string, start: number): number {
+  let index = start;
+  while (index < source.length && isTapWhitespace(source.charCodeAt(index))) index += 1;
+  return index;
+}
+
+function parseTapDirective(source: string, hashIndex: number): string | undefined {
+  if (source.charCodeAt(hashIndex) !== 0x0023) return undefined;
+  const start = skipTapWhitespace(source, hashIndex + 1);
+  for (const directive of ["SKIP", "TODO", "CANCELLED"] as const) {
+    const end = start + directive.length;
+    if (source.startsWith(directive, start) && (end === source.length || isTapWhitespace(source.charCodeAt(end)))) {
+      return directive;
+    }
+  }
+  return undefined;
+}
+
+function findTapDirective(
+  source: string,
+  start: number,
+): { readonly directive: string; readonly whitespaceStart: number } | undefined {
+  let index = start;
+  while (index < source.length) {
+    if (!isTapWhitespace(source.charCodeAt(index))) {
+      index += 1;
+      continue;
+    }
+    const whitespaceStart = index;
+    const hashIndex = skipTapWhitespace(source, index);
+    const directive = parseTapDirective(source, hashIndex);
+    if (directive !== undefined) return { directive, whitespaceStart };
+    index = hashIndex;
+  }
+  return undefined;
+}
+
+function trimTapWhitespaceEnd(source: string, start: number, end: number): number {
+  while (end > start && isTapWhitespace(source.charCodeAt(end - 1))) end -= 1;
+  return end;
+}
+
+function parseTapPoint(line: string): TapPoint | undefined {
+  let index = 0;
+  while (line.charCodeAt(index) === 0x0020) index += 1;
+  const indentation = index;
+
+  const result = line.startsWith("not ok", index) ? "not ok" : line.startsWith("ok", index) ? "ok" : undefined;
+  if (result === undefined) return undefined;
+  index += result.length;
+  if (!isTapWhitespace(line.charCodeAt(index))) return undefined;
+  index = skipTapWhitespace(line, index);
+
+  const numberStart = index;
+  while (line.charCodeAt(index) >= 0x0030 && line.charCodeAt(index) <= 0x0039) index += 1;
+  if (index === numberStart) return undefined;
+  const number = line.slice(numberStart, index);
+
+  const remainderStart = index;
+  const remainder = skipTapWhitespace(line, remainderStart);
+  if (remainder === line.length) return { indentation, result, number };
+  if (remainder === remainderStart) return undefined;
+
+  if (line.charCodeAt(remainder) === 0x0023) {
+    const directive = parseTapDirective(line, remainder);
+    return directive === undefined ? undefined : { indentation, result, number, directive };
+  }
+  if (line.charCodeAt(remainder) !== 0x002d) return undefined;
+
+  const nameStart = skipTapWhitespace(line, remainder + 1);
+  if (nameStart === remainder + 1) return undefined;
+  const directive = findTapDirective(line, nameStart);
+  const nameEnd = trimTapWhitespaceEnd(line, nameStart, Math.max(nameStart, directive?.whitespaceStart ?? line.length));
+  return {
+    indentation,
+    result,
+    number,
+    name: line.slice(nameStart, nameEnd),
+    ...(directive === undefined ? {} : { directive: directive.directive }),
+  };
+}
 
 function parseYamlScalar(source: string): unknown {
   const value = source.trim();
@@ -195,15 +304,15 @@ export function projectNodeTestTap(tap: string, exitCode: number): NodeTestTapPr
   const tests: NodeTestTapCase[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
-    const match = TAP_POINT.exec(line);
-    if (match === null) continue;
+    const point = parseTapPoint(line);
+    if (point === undefined) continue;
 
-    const result = match[2] as "ok" | "not ok";
-    const name = match[4] ?? match[3] ?? "";
-    const directive = match[5];
+    const result = point.result;
+    const name = point.name ?? point.number;
+    const directive = point.directive;
     let diagnostics: string | undefined;
     let fields: ReadonlyMap<string, unknown> = new Map();
-    const indentation = (match[1] ?? "").length;
+    const indentation = point.indentation;
     if (lines[index + 1] === `${" ".repeat(indentation + 2)}---`) {
       const start = index + 1;
       let end = start + 1;
