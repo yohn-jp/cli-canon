@@ -22,6 +22,10 @@ export interface CommandSchemaProjection {
   readonly output: SchemaProjection;
 }
 
+export interface SchemaProjectionProduct<Catalog extends CommandCatalog = CommandCatalog> {
+  readonly commands: CompiledProduct<Catalog>["commands"];
+}
+
 const JSON_SCHEMA_CHECKS = [
   "greater_than",
   "less_than",
@@ -103,7 +107,7 @@ export function projectSchema<Schema extends z.ZodType>(
 
 /** Project every declared input value schema and handler result schema from a compiled product. */
 export function projectProductSchemas<const Catalog extends CommandCatalog>(
-  product: CompiledProduct<Catalog>,
+  product: SchemaProjectionProduct<Catalog>,
   completeness: SchemaProjectionCompleteness,
 ): readonly CommandSchemaProjection[] {
   return Object.freeze(product.commands.map((command) => {
