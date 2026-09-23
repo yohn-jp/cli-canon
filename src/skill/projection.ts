@@ -1,5 +1,3 @@
-import type { CompiledCommand } from "../command/compiler.js";
-import type { CommandId } from "../command/model.js";
 import { renderHelp } from "../projection/help.js";
 import {
   projectInvocation,
