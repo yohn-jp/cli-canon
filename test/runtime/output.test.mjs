@@ -40,7 +40,18 @@ test("JSON byte budget includes Unicode and the final newline at below, exact, a
 test("serialization failures are explicit non-success outcomes", () => {
   const circular = {};
   circular.self = circular;
-  for (const value of [1n, circular, undefined]) {
+  for (const value of [
+    1n,
+    circular,
+    undefined,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    { nested: undefined },
+    { nested: () => "hidden" },
+    { nested: Symbol("hidden") },
+    { nested: [Number.NaN] },
+  ]) {
     const result = jsonOutput(value);
     assert.equal(result.status, "failure");
     assert.equal(result.failureKind, "serialization");
@@ -105,6 +116,29 @@ test("Node runner uses the typed optional product domain error adapter", async (
     stderr: "DOCUMENT_LOCKED: Document is locked.\n",
     failureKind: "domain",
   });
+});
+
+test("Node result rejects non-finite values instead of silently serializing them as null", async () => {
+  const commands = defineCommands({
+    read: {
+      route: ["read"],
+      summary: "Read.",
+      input: {},
+      result: z.unknown(),
+    },
+  });
+  for (const value of [{ value: Number.NaN }, { value: Number.POSITIVE_INFINITY }]) {
+    const product = compileProduct({
+      name: "fixture",
+      commands,
+      handlers: bindHandlers(commands)({ read: () => value }),
+    });
+    const result = await runNodeCli(product, ["read"]);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.failureKind, "serialization");
+    assert.match(result.stderr, /OUTPUT_SERIALIZATION_FAILED/);
+    assert.equal(result.stdout, "");
+  }
 });
 
 test("Node result serialization failure is distinct from handler-result validation", async () => {
