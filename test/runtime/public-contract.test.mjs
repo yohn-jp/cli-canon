@@ -86,6 +86,36 @@ test("compiled input and output schemas expose complete JSON Schema projections"
   });
 });
 
+test("declared complete schema projection is admitted during product construction", () => {
+  const commands = defineCommands({
+    read: {
+      route: ["read"],
+      summary: "Read.",
+      input: { value: positional(z.string().refine((value) => value !== "reserved")) },
+      result: z.object({ value: z.string() }),
+    },
+  });
+  const handlers = bindHandlers(commands)({ read: ({ value }) => ({ value }) });
+  assert.throws(
+    () => compileProduct({
+      name: "fixture",
+      commands,
+      handlers,
+      schemaProjectionCompleteness: "complete",
+    }),
+    (error) => error instanceof CanonConstructionError
+      && error.issues.some((issue) => issue.code === "UNSUPPORTED_SCHEMA_PROJECTION"),
+  );
+
+  const structural = compileProduct({
+    name: "fixture",
+    commands,
+    handlers,
+    schemaProjectionCompleteness: "structural-only",
+  });
+  assert.equal(structural.schemaProjectionCompleteness, "structural-only");
+});
+
 test("schema projections label structural-only output and reject unsupported complete claims", () => {
   const transformed = z.string().transform((value) => value.length);
   const input = projectSchema(transformed, { io: "input", completeness: "complete" });
