@@ -1,7 +1,7 @@
 import * as z from "zod";
 import { certificationOracleFor } from "./fixture-oracle.mjs";
 
-export async function runCertificationScenario(api, node, packageMetadata) {
+export async function runCertificationScenario(api, node, packageMetadata, input) {
   const commands = api.defineCommands({
     "example.echo": {
       route: ["echo"],
@@ -23,7 +23,7 @@ export async function runCertificationScenario(api, node, packageMetadata) {
     "example.echo": ({ message, suffix, format }) => ({ message, suffix, format }),
   });
   const product = api.compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers });
-  const success = await node.runNodeCli(product, ["echo", "shared scenario", "suffix", "--format=full"]);
+  const success = await node.runNodeCli(product, ["echo", input.message, input.suffix, `--format=${input.format}`]);
   const validation = await node.runNodeCli(product, ["echo", ""]);
   const fullHelp = await node.runNodeCli(product, ["echo", "--help=full"]);
   const jsonHelp = await node.runNodeCli(product, ["--help=json"]);
@@ -50,10 +50,13 @@ export async function runCertificationScenario(api, node, packageMetadata) {
   };
 }
 
-export function createCertificationScenario(packageMetadata) {
+export function createCertificationScenario(packageMetadata, requiredLanes) {
   return {
     id: "echo CLI contract",
+    commandId: "example.echo",
+    input: { message: "shared scenario", suffix: "suffix", format: "full" },
     expected: certificationOracleFor(packageMetadata),
-    run: ({ api, node }) => runCertificationScenario(api, node, packageMetadata),
+    requiredLanes,
+    run: ({ api, node }, input) => runCertificationScenario(api, node, packageMetadata, input),
   };
 }
