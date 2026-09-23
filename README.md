@@ -80,6 +80,37 @@ The default `optionLookingValuePolicy: "consume"` preserves Commander behavior:
 `UNSUPPORTED_GRAMMAR`; the adapter does not emulate it with a second parser.
 Unknown options and surplus positionals remain rejected.
 
+## Product identity and public schemas
+
+Pass the consuming product's package metadata at composition time. CLI Canon
+does not read the filesystem or maintain a second version/bin literal:
+
+```ts
+import packageMetadata from "./package.json" with { type: "json" };
+
+const product = compileProduct({
+  name: "document-cli",
+  packageMetadata,
+  commands,
+  handlers,
+});
+```
+
+`projectDiscovery(product)` exposes only the package `name`, `version`, and
+optional `bin` fields under `packageMetadata`. `projectProductSchemas(product,
+"complete")` projects each field's Zod value schema and the output schema to
+JSON Schema. Command presence and cardinality remain in the discovery fields.
+Complete projection rejects Zod refinements or other schemas that cannot be
+represented fully. Use `"structural-only"` when the JSON Schema describes
+structure but cannot claim equivalent validation.
+
+## Certification helpers
+
+`@yohn-jp/cli-canon/testing` exports `certifyScenarios`. A scenario carries its
+independent expected result and can be run against the source, built, and packed
+lanes. Keep the expectation separate from the production projector being
+certified. This subpath is not imported by the root or Node runtime entries.
+
 ## Architecture references
 
 - [Canonical architecture reference](docs/architecture/CANON.md) — normative rules for implementation agents and consumers.

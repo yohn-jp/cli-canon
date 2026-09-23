@@ -1,6 +1,7 @@
 import * as z from "zod";
+import { certificationOracleFor } from "./fixture-oracle.mjs";
 
-export async function runCertificationScenario(api, node) {
+export async function runCertificationScenario(api, node, packageMetadata) {
   const commands = api.defineCommands({
     "example.echo": {
       route: ["echo"],
@@ -21,7 +22,7 @@ export async function runCertificationScenario(api, node) {
   const handlers = api.bindHandlers(commands)({
     "example.echo": ({ message, suffix, format }) => ({ message, suffix, format }),
   });
-  const product = api.compileProduct({ name: "fixture-cli", commands, handlers });
+  const product = api.compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers });
   const success = await node.runNodeCli(product, ["echo", "shared scenario", "suffix", "--format=full"]);
   const validation = await node.runNodeCli(product, ["echo", ""]);
   const fullHelp = await node.runNodeCli(product, ["echo", "--help=full"]);
@@ -46,5 +47,13 @@ export async function runCertificationScenario(api, node) {
       discovery: JSON.parse(jsonHelp.stdout),
       trailingNewline: jsonHelp.stdout.endsWith("\n"),
     },
+  };
+}
+
+export function createCertificationScenario(packageMetadata) {
+  return {
+    id: "echo CLI contract",
+    expected: certificationOracleFor(packageMetadata),
+    run: ({ api, node }) => runCertificationScenario(api, node, packageMetadata),
   };
 }

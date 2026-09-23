@@ -1,0 +1,8 @@
+{
+  "name": "fixture-cli",
+  "version": "2.4.1",
+  "bin": {
+    "fixture-cli": "./bin/fixture-cli.js"
+  },
+  "description": "This field must not enter the public manifest."
+}

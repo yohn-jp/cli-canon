@@ -13,6 +13,7 @@ import { compileSkills, type CompiledSkills } from "../skill/compiler.js";
 import type { SkillCatalog } from "../skill/model.js";
 import { compilePaths } from "../path/paths.js";
 import type { CompiledPaths, PathCatalog } from "../path/model.js";
+import type { ProductPackageIdentity } from "../product/identity.js";
 
 export interface CompiledField {
   readonly key: string;
@@ -50,6 +51,8 @@ export interface CompileProductInput<
   readonly name: string;
   readonly commands: Catalog;
   readonly handlers: HandlerMap<Catalog>;
+  /** Package.json metadata supplied by the product composition root. */
+  readonly packageMetadata?: ProductPackageIdentity;
   readonly skills?: Skills;
   readonly paths?: Paths;
 }
@@ -66,6 +69,7 @@ export interface CompiledProduct<
     Catalog[CommandId<Catalog>]["result"]
   >[];
   readonly handlers: HandlerMap<Catalog>;
+  readonly packageMetadata?: ProductPackageIdentity;
   readonly skills: CompiledSkills<Skills>;
   readonly paths: CompiledPaths<Paths>;
 }
@@ -85,6 +89,74 @@ function signature(field: InputDefinition[string]): string {
   return field.kind;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function compilePackageMetadata(
+  value: unknown,
+  issues: CanonConstructionIssue[],
+): ProductPackageIdentity | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    issues.push({
+      code: "INVALID_PRODUCT_IDENTITY",
+      message: "packageMetadata must be package metadata with a non-empty name and version",
+    });
+    return undefined;
+  }
+
+  const { name, version } = value;
+  if (typeof name !== "string" || name.trim().length === 0 || typeof version !== "string" || version.trim().length === 0) {
+    issues.push({
+      code: "INVALID_PRODUCT_IDENTITY",
+      message: "packageMetadata must have a non-empty name and version",
+    });
+    return undefined;
+  }
+
+  let bin: ProductPackageIdentity["bin"];
+  if (value.bin !== undefined) {
+    if (typeof value.bin === "string" && value.bin.length > 0) {
+      bin = value.bin;
+    } else if (isRecord(value.bin)) {
+      const normalizedBins: Record<string, string> = {};
+      let valid = Object.keys(value.bin).length > 0;
+      for (const [commandName, executable] of Object.entries(value.bin)) {
+        if (commandName.length === 0 || typeof executable !== "string" || executable.length === 0) {
+          valid = false;
+        } else {
+          Object.defineProperty(normalizedBins, commandName, {
+            value: executable,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          });
+        }
+      }
+      if (valid) {
+        bin = Object.freeze(normalizedBins);
+      } else {
+        issues.push({
+          code: "INVALID_PRODUCT_IDENTITY",
+          message: "packageMetadata.bin must be a non-empty executable path or command map",
+        });
+      }
+    } else {
+      issues.push({
+        code: "INVALID_PRODUCT_IDENTITY",
+        message: "packageMetadata.bin must be a non-empty executable path or command map",
+      });
+    }
+  }
+
+  return Object.freeze({
+    name,
+    version,
+    ...(bin === undefined ? {} : { bin }),
+  });
+}
+
 export function compileProduct<
   const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
@@ -93,6 +165,7 @@ export function compileProduct<
   input: CompileProductInput<Catalog, Skills, Paths>,
 ): CompiledProduct<Catalog, Skills, Paths> {
   const issues: CanonConstructionIssue[] = [];
+  const packageMetadata = compilePackageMetadata(input.packageMetadata, issues);
   const routes = new Map<string, string>();
   const anywhereFlags = new Map<string, { commandId: string; fieldKey: string; signature: string }>();
   const compiled: CompiledCommand[] = [];
@@ -258,6 +331,7 @@ export function compileProduct<
     name: input.name,
     commands: Object.freeze(compiled) as CompiledProduct<Catalog>["commands"],
     handlers: input.handlers,
+    ...(packageMetadata === undefined ? {} : { packageMetadata }),
     skills,
     paths,
   });
