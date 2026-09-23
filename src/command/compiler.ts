@@ -5,6 +5,7 @@ import type {
   CommandCatalog,
   CommandDefinition,
   CommandId,
+  FieldDefinition,
   InputDefinition,
   OptionLookingValuePolicy,
   OptionValueArity,
@@ -94,6 +95,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function snapshotField(field: FieldDefinition): FieldDefinition {
+  return field.kind === "option" || field.kind === "flag"
+    ? Object.freeze({ ...field, aliases: Object.freeze([...field.aliases]) })
+    : Object.freeze({ ...field });
+}
+
+function snapshotCommandDefinition<
+  Input extends InputDefinition,
+  Result extends z.ZodType,
+>(definition: CommandDefinition<Input, Result>): CommandDefinition<Input, Result> {
+  const input = Object.freeze(Object.fromEntries(
+    Object.entries(definition.input).map(([key, field]) => [key, snapshotField(field)]),
+  )) as Input;
+  const orderedOptionGroups = definition.orderedOptionGroups?.map((group) => Object.freeze([...group]));
+  return Object.freeze({
+    route: Object.freeze([...definition.route]) as CommandDefinition<Input, Result>["route"],
+    summary: definition.summary,
+    ...(definition.description === undefined ? {} : { description: definition.description }),
+    ...(definition.visibility === undefined ? {} : { visibility: definition.visibility }),
+    ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
+    input,
+    result: definition.result,
+    ...(orderedOptionGroups === undefined ? {} : { orderedOptionGroups: Object.freeze(orderedOptionGroups) }),
+  });
+}
+
+function snapshotHandlers<Catalog extends CommandCatalog>(handlers: HandlerMap<Catalog>): HandlerMap<Catalog> {
+  return Object.freeze(Object.fromEntries(Object.entries(handlers))) as HandlerMap<Catalog>;
+}
+
 function compilePackageMetadata(
   value: unknown,
   issues: CanonConstructionIssue[],
@@ -170,6 +201,32 @@ export function compileProduct<
   const routes = new Map<string, string>();
   const anywhereFlags = new Map<string, { commandId: string; fieldKey: string; signature: string }>();
   const compiled: CompiledCommand[] = [];
+  const suppliedHandlers = isRecord(input.handlers) ? input.handlers : undefined;
+  if (suppliedHandlers === undefined) {
+    issues.push({
+      code: "INVALID_HANDLER_BINDING",
+      message: "handlers must be an object mapping every command ID to a function",
+    });
+  } else {
+    for (const commandId of Object.keys(input.commands)) {
+      if (!Object.hasOwn(suppliedHandlers, commandId) || typeof suppliedHandlers[commandId] !== "function") {
+        issues.push({
+          code: "INVALID_HANDLER_BINDING",
+          commandId,
+          message: `${commandId}: command handler must be a function`,
+        });
+      }
+    }
+    for (const handlerId of Object.keys(suppliedHandlers)) {
+      if (!Object.hasOwn(input.commands, handlerId)) {
+        issues.push({
+          code: "INVALID_HANDLER_BINDING",
+          commandId: handlerId,
+          message: `${handlerId}: handler has no matching command declaration`,
+        });
+      }
+    }
+  }
 
   for (const [commandId, definition] of Object.entries(input.commands)) {
     if (definition.visibility !== undefined && definition.visibility !== "public" && definition.visibility !== "private") {
@@ -327,7 +384,7 @@ export function compileProduct<
       ...(definition.description === undefined ? {} : { description: definition.description }),
       ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
       fields: Object.freeze(fields),
-      definition,
+      definition: snapshotCommandDefinition(definition),
     }));
   }
 
@@ -335,11 +392,12 @@ export function compileProduct<
 
   const skills = compileSkills(input.skills ?? {} as Skills, compiled);
   const paths = compilePaths(input.paths ?? {} as Paths);
+  const handlers = snapshotHandlers(input.handlers);
 
   return Object.freeze({
     name: input.name,
     commands: Object.freeze(compiled) as CompiledProduct<Catalog>["commands"],
-    handlers: input.handlers,
+    handlers,
     ...(packageMetadata === undefined ? {} : { packageMetadata }),
     skills,
     paths,
