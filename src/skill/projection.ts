@@ -14,8 +14,9 @@ export interface SkillProjectionProduct<
   readonly skills: CompiledSkills<Skills>;
 }
 
-export type ProjectedSkillStep<CommandId extends string = string> =
+export type ProjectedSkillStep<CommandId extends string = string, Id extends string = string> =
   | { readonly kind: "prose"; readonly text: string }
+  | { readonly kind: "delegate"; readonly skillId: Id; readonly guidance?: string }
   | {
       readonly kind: "command";
       readonly commandId: CommandId;
@@ -39,14 +40,22 @@ export type ProjectedSkillStep<CommandId extends string = string> =
 export interface ProjectedSkill<Id extends string = string, CommandId extends string = string> {
   readonly id: Id;
   readonly summary: string;
-  readonly steps: readonly ProjectedSkillStep<CommandId>[];
+  readonly intent?: string;
+  readonly invariants?: readonly string[];
+  readonly references?: readonly { readonly kind: "domain-result"; readonly id: string }[];
+  readonly steps: readonly ProjectedSkillStep<CommandId, Id>[];
 }
 
-function projectedStep<const Catalog extends CommandCatalog, CommandId extends string>(
+function projectedStep<const Catalog extends CommandCatalog, CommandId extends string, Id extends string>(
   product: CompiledProduct<Catalog>,
-  step: CompiledSkillStep<CommandId>,
-): ProjectedSkillStep<CommandId> {
+  step: CompiledSkillStep<CommandId, Id>,
+): ProjectedSkillStep<CommandId, Id> {
   if (step.kind === "prose") return { kind: "prose", text: step.text };
+  if (step.kind === "delegate") return {
+    kind: "delegate",
+    skillId: step.skillId,
+    ...(step.guidance === undefined ? {} : { guidance: step.guidance }),
+  };
 
   const command = product.commands.find((candidate) => String(candidate.id) === step.commandId);
   if (command === undefined) {
@@ -57,7 +66,8 @@ function projectedStep<const Catalog extends CommandCatalog, CommandId extends s
   const usage = usageLine.startsWith("Usage: ") ? usageLine.slice("Usage: ".length) : usageLine;
   const requirements = [
     ...command.fields
-      .filter((field) => field.kind === "positional" || (field.kind === "option" && field.required === true))
+      .filter((field) => (field.kind === "positional" && field.required === true)
+        || (field.kind === "option" && field.required === true))
       .map((field) => ({ kind: "field" as const, name: field.key })),
     ...step.prerequisites.map((text) => ({ kind: "prerequisite" as const, text })),
   ];
@@ -88,6 +98,9 @@ export function projectSkill<
   return {
     id: skill.id,
     summary: skill.summary,
+    ...(skill.intent === undefined ? {} : { intent: skill.intent }),
+    ...(skill.invariants.length === 0 ? {} : { invariants: skill.invariants }),
+    ...(skill.references.length === 0 ? {} : { references: skill.references }),
     steps: skill.steps.map((step) => projectedStep(product, step)),
   };
 }
@@ -108,10 +121,23 @@ function requireOutput(output: ReturnType<typeof textOutput>): string {
 }
 
 export function renderSkillText(skill: ProjectedSkill, options: OutputPolicyOptions = {}): string {
-  const lines = [skill.summary, ""];
+  const lines = [skill.summary];
+  if (skill.intent !== undefined) lines.push("Intent:", skill.intent);
+  if (skill.invariants !== undefined && skill.invariants.length > 0) {
+    lines.push("Invariants:", ...skill.invariants.map((invariant) => `- ${invariant}`));
+  }
+  if (skill.references !== undefined && skill.references.length > 0) {
+    lines.push("Domain result references:", ...skill.references.map((reference) => `- ${reference.id}`));
+  }
+  lines.push("");
   for (const step of skill.steps) {
     if (step.kind === "prose") {
       lines.push(step.text, "");
+      continue;
+    }
+    if (step.kind === "delegate") {
+      if (step.guidance !== undefined) lines.push(step.guidance);
+      lines.push(`Continue with Skill: ${step.skillId}`, "");
       continue;
     }
     lines.push(step.guidance, `Run: ${step.usage}`);

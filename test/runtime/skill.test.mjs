@@ -3,6 +3,7 @@ import test from "node:test";
 import * as z from "zod";
 import {
   bindHandlers,
+  CanonConstructionError,
   compileProduct,
   defineCommands,
   flag,
@@ -137,6 +138,92 @@ test("bounded Skill text and JSON use the shared byte budget without truncation"
     (error) => error instanceof OutputPolicyError && error.failureKind === "budget",
   );
   assert.ok(utf8ByteLength(boundedJson) <= jsonBytes);
+});
+
+test("Skill metadata and delegation are preserved and validated", () => {
+  const skills = defineSkills({
+    setup: {
+      summary: "Prepare the product.",
+      intent: "Establish a ready working context.",
+      invariants: ["Never change product-owned authorization decisions."],
+      references: [{ kind: "domain-result", id: "product.readiness" }],
+      steps: [{ kind: "delegate", skillId: "details", guidance: "Continue with detailed review." }],
+    },
+    details: { summary: "Review details.", steps: [{ kind: "prose", text: "Inspect the existing result." }] },
+  });
+  const product = compileProduct({
+    name: "fixture",
+    commands: defineCommands({}),
+    handlers: {},
+    skills,
+  });
+  const projected = projectSkill(product, "setup");
+  assert.equal(projected.intent, "Establish a ready working context.");
+  assert.deepEqual(projected.invariants, ["Never change product-owned authorization decisions."]);
+  assert.deepEqual(projected.references, [{ kind: "domain-result", id: "product.readiness" }]);
+  assert.deepEqual(projected.steps[0], {
+    kind: "delegate",
+    skillId: "details",
+    guidance: "Continue with detailed review.",
+  });
+  assert.deepEqual(JSON.parse(renderSkillJson(projected)), projected);
+  const text = renderSkillText(projected);
+  assert.match(text, /Intent:\nEstablish a ready working context\./);
+  assert.match(text, /Invariants:\n- Never change product-owned authorization decisions\./);
+  assert.match(text, /Domain result references:\n- product\.readiness/);
+  assert.match(text, /Continue with Skill: details/);
+  assert.equal(renderSkillText(projected), text);
+});
+
+test("Skill compilation rejects unknown delegation, cycles, and private commands", () => {
+  const commands = defineCommands({
+    internal: {
+      route: ["internal"],
+      summary: "Internal command.",
+      visibility: "private",
+      input: {},
+      result: z.object({}),
+    },
+  });
+  const handlers = bindHandlers(commands)({ internal: () => ({}) });
+  const compileSkills = (skills) => compileProduct({ name: "fixture", commands, handlers, skills });
+  assert.throws(
+    () => compileSkills({ first: { summary: "A.", steps: [{ kind: "delegate", skillId: "missing" }] } }),
+    (error) => error instanceof SkillConstructionError
+      && error.issues.some((issue) => issue.code === "UNKNOWN_SKILL_REFERENCE"),
+  );
+  assert.throws(
+    () => compileSkills({
+      first: { summary: "A.", steps: [{ kind: "delegate", skillId: "second" }] },
+      second: { summary: "B.", steps: [{ kind: "delegate", skillId: "first" }] },
+    }),
+    (error) => error instanceof SkillConstructionError
+      && error.issues.some((issue) => issue.code === "SKILL_DELEGATE_CYCLE"),
+  );
+  assert.throws(
+    () => compileSkills({
+      first: { summary: "A.", steps: [{ kind: "command", commandId: "internal", guidance: "Run." }] },
+    }),
+    (error) => error instanceof SkillConstructionError
+      && error.issues.some((issue) => issue.code === "PRIVATE_COMMAND_REFERENCE"),
+  );
+  assert.throws(
+    () => compileProduct({
+      name: "fixture",
+      commands: {
+        internal: {
+          route: ["internal"],
+          summary: "Internal command.",
+          visibility: "unknown",
+          input: {},
+          result: z.object({}),
+        },
+      },
+      handlers: { internal: () => ({}) },
+    }),
+    (error) => error instanceof CanonConstructionError
+      && error.issues.some((issue) => issue.code === "INVALID_COMMAND_VISIBILITY"),
+  );
 });
 
 test("Skill compilation rejects unknown command references at construction", () => {
