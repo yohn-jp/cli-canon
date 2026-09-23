@@ -97,6 +97,9 @@ import {
   type PathParameterName,
   projectProductSchemas,
   type ProductPackageIdentity,
+  defineSkills,
+  projectSkill,
+  renderSkillJson,
 } from "@yohn-jp/cli-canon";
 import { runNodeCli } from "@yohn-jp/cli-canon/node";
 import { certifyScenarios, type CertificationScenario } from "@yohn-jp/cli-canon/testing";
@@ -130,6 +133,24 @@ const packageMetadata: ProductPackageIdentity = {
 const product = compileProduct({ name: "fixture-cli", packageMetadata, commands, handlers });
 void projectProductSchemas(product, "complete");
 void runNodeCli(product, ["echo", "typed package", "--format=full"]);
+const skills = defineSkills({
+  setup: {
+    summary: "Prepare the product.",
+    intent: "Use the existing product readiness result.",
+    invariants: ["Do not recompute product decisions."],
+    references: [{ kind: "domain-result", id: "product.readiness" }],
+    steps: [{ kind: "delegate", skillId: "details" }],
+  },
+  details: { summary: "Review details.", steps: [{ kind: "prose", text: "Inspect the existing result." }] },
+});
+const skillProduct = compileProduct({ name: "fixture-cli", commands, handlers, skills });
+const skill = projectSkill(skillProduct, "setup");
+void renderSkillJson(skill);
+const invalidDelegation = defineSkills({
+  setup: { summary: "Invalid delegation.", steps: [{ kind: "delegate", skillId: "unknown" }] },
+});
+// @ts-expect-error Packed types reject Skill references outside the declared catalog.
+compileProduct({ name: "fixture-cli", commands, handlers, skills: invalidDelegation });
 type Id = CommandId<typeof commands>;
 const validId: Id = "example.echo";
 void validId;
@@ -237,6 +258,21 @@ api.writeCliOutcome(output, {
   writeStderr: (text) => writes.push(["stderr", text]),
 });
 assert.deepEqual(writes, [["stdout", expectedJson]]);
+const packedSkills = api.defineSkills({
+  setup: {
+    summary: "Prepare the product.",
+    intent: "Use the existing readiness result.",
+    invariants: ["Do not recompute decisions."],
+    references: [{ kind: "domain-result", id: "product.readiness" }],
+    steps: [{ kind: "delegate", skillId: "details" }],
+  },
+  details: { summary: "Review details.", steps: [{ kind: "prose", text: "Inspect the result." }] },
+});
+const packedSkillProduct = api.compileProduct({ name: "fixture-cli", commands: {}, handlers: {}, skills: packedSkills });
+const packedSkill = api.projectSkill(packedSkillProduct, "setup");
+assert.equal(packedSkill.intent, "Use the existing readiness result.");
+assert.equal(packedSkill.steps[0].skillId, "details");
+assert.deepEqual(JSON.parse(api.renderSkillJson(packedSkill)), packedSkill);
 const paths = api.compilePaths(api.definePaths({
   app: {
     root: {

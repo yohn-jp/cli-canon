@@ -10,7 +10,7 @@ import type {
   OptionValueArity,
 } from "./model.js";
 import { compileSkills, type CompiledSkills } from "../skill/compiler.js";
-import type { SkillCatalog } from "../skill/model.js";
+import type { SkillCatalog, SkillId } from "../skill/model.js";
 import { compilePaths } from "../path/paths.js";
 import type { CompiledPaths, PathCatalog } from "../path/model.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
@@ -37,6 +37,7 @@ export interface CompiledCommand<
   readonly id: Id;
   readonly route: readonly [string, ...string[]];
   readonly summary: string;
+  readonly visibility: "public" | "private";
   readonly description?: string;
   readonly examples?: readonly string[];
   readonly fields: readonly CompiledField[];
@@ -45,7 +46,7 @@ export interface CompiledCommand<
 
 export interface CompileProductInput<
   Catalog extends CommandCatalog,
-  Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
+  Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
 > {
   readonly name: string;
@@ -59,7 +60,7 @@ export interface CompileProductInput<
 
 export interface CompiledProduct<
   Catalog extends CommandCatalog = CommandCatalog,
-  Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
+  Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
 > {
   readonly name: string;
@@ -159,7 +160,7 @@ function compilePackageMetadata(
 
 export function compileProduct<
   const Catalog extends CommandCatalog,
-  const Skills extends SkillCatalog<CommandId<Catalog>> = SkillCatalog<CommandId<Catalog>>,
+  const Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   const Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
 >(
   input: CompileProductInput<Catalog, Skills, Paths>,
@@ -171,6 +172,13 @@ export function compileProduct<
   const compiled: CompiledCommand[] = [];
 
   for (const [commandId, definition] of Object.entries(input.commands)) {
+    if (definition.visibility !== undefined && definition.visibility !== "public" && definition.visibility !== "private") {
+      issues.push({
+        code: "INVALID_COMMAND_VISIBILITY",
+        commandId,
+        message: `${commandId}: visibility must be public or private`,
+      });
+    }
     if (definition.route.length === 0 || definition.route.some((segment) => segment.trim() === "" || /\s/u.test(segment))) {
       issues.push({ code: "INVALID_ROUTE", commandId, message: `${commandId}: route segments must be non-empty single tokens` });
     }
@@ -315,6 +323,7 @@ export function compileProduct<
       id: commandId,
       route: Object.freeze([...definition.route]) as readonly [string, ...string[]],
       summary: definition.summary,
+      visibility: definition.visibility ?? "public",
       ...(definition.description === undefined ? {} : { description: definition.description }),
       ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
       fields: Object.freeze(fields),

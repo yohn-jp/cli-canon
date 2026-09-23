@@ -5,6 +5,7 @@ import { bindHandlers } from "../../src/command/handlers.js";
 import { flag, option, positional } from "../../src/command/fields.js";
 import type { CommandId } from "../../src/command/model.js";
 import { defineSkills, type SkillCatalog, type SkillId } from "../../src/skill/model.js";
+import { projectSkill } from "../../src/skill/projection.js";
 
 const commands = defineCommands({
   "document.render": {
@@ -49,6 +50,8 @@ const handlers = bindHandlers(commands)({
 });
 const compiledProduct = compileProduct({ name: "fixture", commands, handlers, skills });
 compiledProduct.skills[0]?.id satisfies SkillId<typeof skills> | undefined;
+const projected = projectSkill(compiledProduct, "document.workflow");
+projected.steps[1]?.commandId satisfies "document.render" | undefined;
 
 const badSkills = defineSkills({
   broken: {
@@ -67,3 +70,16 @@ const proseOnlySkills = defineSkills({
 });
 const proseOnlyId: SkillId<typeof proseOnlySkills> = "guide";
 void proseOnlyId;
+
+const delegatedSkills = defineSkills({
+  workflow: { summary: "Delegate within the Skill catalog.", steps: [{ kind: "delegate", skillId: "details" }] },
+  details: { summary: "Detailed guidance.", steps: [{ kind: "prose", text: "Review the existing result." }] },
+});
+const delegatedProduct = compileProduct({ name: "fixture", commands, handlers, skills: delegatedSkills });
+delegatedProduct.skills[0]?.steps[0]?.skillId satisfies SkillId<typeof delegatedSkills> | undefined;
+
+const badDelegation = defineSkills({
+  workflow: { summary: "Invalid delegation.", steps: [{ kind: "delegate", skillId: "missing" }] },
+});
+// @ts-expect-error compileProduct restricts delegated Skill IDs to the declared catalog.
+compileProduct({ name: "fixture", commands, handlers, skills: badDelegation });

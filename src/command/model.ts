@@ -4,6 +4,7 @@ export type AnySchema = z.ZodType;
 export type OptionPlacement = "after-route" | "anywhere";
 export type OptionValueArity = "required" | "optional";
 export type OptionLookingValuePolicy = "consume" | "reject";
+export type CommandVisibility = "public" | "private";
 
 export interface PositionalField<
   Schema extends AnySchema = AnySchema,
@@ -59,6 +60,7 @@ export interface CommandDefinition<
   readonly route: readonly [string, ...string[]];
   readonly summary: string;
   readonly description?: string;
+  readonly visibility?: CommandVisibility;
   readonly examples?: readonly string[];
   readonly input: Input;
   readonly result: Result;

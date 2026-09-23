@@ -1,10 +1,26 @@
-export interface SkillConstructionIssue {
-  readonly code: "UNKNOWN_COMMAND_REFERENCE";
+interface SkillConstructionIssueBase {
   readonly skillId: string;
-  readonly stepIndex: number;
-  readonly commandId: string;
+  readonly stepIndex?: number;
+  readonly commandId?: string;
+  readonly delegateSkillId?: string;
   readonly message: string;
 }
+
+export type SkillConstructionIssue =
+  | (SkillConstructionIssueBase & {
+    readonly code: "UNKNOWN_COMMAND_REFERENCE" | "PRIVATE_COMMAND_REFERENCE";
+    readonly stepIndex: number;
+    readonly commandId: string;
+  })
+  | (SkillConstructionIssueBase & {
+    readonly code: "UNKNOWN_SKILL_REFERENCE";
+    readonly stepIndex: number;
+    readonly delegateSkillId: string;
+  })
+  | (SkillConstructionIssueBase & {
+    readonly code: "SKILL_DELEGATE_CYCLE";
+    readonly delegateSkillId: string;
+  });
 
 export class SkillConstructionError extends Error {
   readonly code = "SKILL_CONSTRUCTION_FAILED" as const;
