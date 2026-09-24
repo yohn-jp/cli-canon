@@ -88,6 +88,7 @@ import {
   compileProduct,
   composeCommandProjection,
   defineCommands,
+  defineGroups,
   definePaths,
   jsonOutput,
   option,
@@ -98,7 +99,9 @@ import {
   type CliIO,
   type CliOutcome,
   type CommandId,
+  type CommandTreeRootNode,
   type DomainErrorAdapter,
+  type GroupId,
   type PathId,
   type PathParameterName,
   projectProductSchemas,
@@ -208,6 +211,21 @@ void validId;
 // @ts-expect-error IDs are inferred from the declarations in the packed types.
 const invalidId: Id = "example.unknown";
 void invalidId;
+const groups = defineGroups({ tools: { route: ["tools"], summary: "Tools." } });
+const toolCommands = defineCommands({
+  "tools.echo": { route: ["tools", "echo"], summary: "Echo.", input: {}, result: z.object({}) },
+});
+const treeProduct = compileProduct({
+  name: "fixture-cli",
+  commands: toolCommands,
+  handlers: bindHandlers(toolCommands)({ "tools.echo": () => ({}) }),
+  groups,
+});
+const packedTree: CommandTreeRootNode<typeof groups, typeof toolCommands> = treeProduct.tree;
+const packedGroup = packedTree.children[0];
+if (packedGroup?.kind === "group") packedGroup.id satisfies GroupId<typeof groups>;
+// @ts-expect-error Packed compiled trees are immutable.
+packedTree.children.push(packedTree.children[0]);
 const paths = definePaths({
   app: {
     root: {
@@ -300,6 +318,7 @@ void packedTapProjection.failures;
     `import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import * as z from "zod";
 import * as api from "@yohn-jp/cli-canon";
 import * as node from "@yohn-jp/cli-canon/node";
 import packageMetadata from "./package.json" with { type: "json" };
@@ -405,6 +424,34 @@ const packedSkill = api.projectSkill(packedSkillProduct, "setup");
 assert.equal(packedSkill.intent, "Use the existing readiness result.");
 assert.equal(packedSkill.steps[0].skillId, "details");
 assert.deepEqual(JSON.parse(api.renderSkillJson(packedSkill)), packedSkill);
+const treeCommands = api.defineCommands({
+  "tools.echo": { route: ["tools", "echo"], summary: "Echo.", input: {}, result: z.object({}) },
+});
+const packedTreeProduct = api.compileProduct({
+  name: "fixture-cli",
+  commands: treeCommands,
+  handlers: { "tools.echo": () => ({}) },
+  groups: api.defineGroups({ tools: { route: ["tools"], summary: "Tools." } }),
+});
+const [packedGroup] = packedTreeProduct.tree.children;
+assert.equal(packedTreeProduct.tree.kind, "root");
+assert.equal(packedGroup.kind, "group");
+assert.equal(packedGroup.id, "tools");
+assert.equal(packedGroup.children[0].kind, "command");
+assert.equal(packedTreeProduct.commands[0].definition, packedGroup.children[0].definition);
+assert.ok(Object.isFrozen(packedTreeProduct.tree) && Object.isFrozen(packedGroup.children));
+assert.throws(
+  () => api.compileProduct({
+    name: "fixture-cli",
+    commands: treeCommands,
+    handlers: { "tools.echo": () => ({}) },
+    groups: { tools: { route: ["tools", "echo"], summary: "Tools." } },
+  }),
+  (error) => error instanceof api.CanonConstructionError
+    && error.issues[0]?.code === "AMBIGUOUS_ROUTE_OWNERSHIP"
+    && error.issues[0]?.groupId === "tools"
+    && error.issues[0]?.commandId === "tools.echo",
+);
 const paths = api.compilePaths(api.definePaths({
   app: {
     root: {

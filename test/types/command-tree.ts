@@ -1,5 +1,7 @@
 import * as z from "zod";
 import {
+  bindHandlers,
+  compileProduct,
   defineCommands,
   defineGroups,
   option,
@@ -7,6 +9,7 @@ import {
   type CommandId,
   type CommandInput,
   type CommandResultOutput,
+  type CompiledProduct,
   type CommandTreeChildNode,
   type CommandTreeCommandNode,
   type CommandTreeGroupNode,
@@ -152,3 +155,36 @@ defineGroups({
   // @ts-expect-error group examples are strings.
   badExamples: { route: ["document"], summary: "Bad examples.", examples: [1] },
 });
+
+// compileProduct exposes the canonical tree typed by the declared groups and commands.
+const handlers = bindHandlers(commands)({ "document.render": ({ out }) => ({ writtenFile: out }) });
+const product = compileProduct({ name: "fixture", commands, handlers, groups });
+const tree: CommandTreeRootNode<Groups, Commands> = product.tree;
+void tree;
+const compatibleProduct: CompiledProduct = product;
+void compatibleProduct;
+for (const node of product.tree.children) {
+  if (node.kind === "group") {
+    node.id satisfies GroupId<Groups>;
+    node.definition.summary satisfies string;
+  } else {
+    node.id satisfies CommandId<Commands>;
+    node.definition.input.file satisfies Commands["document.render"]["input"]["file"];
+  }
+}
+// @ts-expect-error the compiled tree is immutable.
+product.tree.children.push(groupNode);
+// @ts-expect-error the compiled tree root is immutable.
+product.tree.kind = "group";
+// The flat commands view keeps its existing element contract.
+product.commands[0]?.fields satisfies readonly unknown[] | undefined;
+
+// Products without groups expose only command leaves under the root.
+const ungrouped = compileProduct({ name: "fixture", commands, handlers });
+for (const node of ungrouped.tree.children) {
+  node.kind satisfies "command";
+  // @ts-expect-error products without groups have no group nodes.
+  void (node.kind === "group");
+}
+// @ts-expect-error group declarations must satisfy GroupDefinition.
+compileProduct({ name: "fixture", commands, handlers, groups: { broken: { route: [], summary: "Broken." } } });

@@ -6,10 +6,13 @@ import type {
   CommandDefinition,
   CommandId,
   FieldDefinition,
+  GroupCatalog,
+  GroupDefinition,
   InputDefinition,
   OptionLookingValuePolicy,
   OptionValueArity,
 } from "./model.js";
+import { commandTreeCommands, compileCommandTree, type CommandTreeRootNode } from "./tree.js";
 import { compileSkills, type CompiledSkills } from "../skill/compiler.js";
 import type { SkillCatalog, SkillId } from "../skill/model.js";
 import { compilePaths } from "../path/paths.js";
@@ -57,9 +60,12 @@ export interface CompileProductInput<
   Catalog extends CommandCatalog,
   Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
+  Groups extends GroupCatalog = Readonly<Record<never, GroupDefinition>>,
 > {
   readonly name: string;
   readonly commands: Catalog;
+  /** Non-executable route groups compiled into the canonical command tree. */
+  readonly groups?: Groups;
   readonly handlers: HandlerMap<Catalog>;
   /** Package.json metadata supplied by the product composition root. */
   readonly packageMetadata?: ProductPackageIdentity;
@@ -73,8 +79,12 @@ export interface CompiledProduct<
   Catalog extends CommandCatalog = CommandCatalog,
   Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
+  Groups extends GroupCatalog = GroupCatalog,
 > {
   readonly name: string;
+  /** The one canonical structural authority for groups and commands. */
+  readonly tree: CommandTreeRootNode<Groups, Catalog>;
+  /** Compatibility flat view derived from the canonical tree in depth-first order. */
   readonly commands: readonly CompiledCommand<
     CommandId<Catalog>,
     Catalog[CommandId<Catalog>]["input"],
@@ -205,12 +215,14 @@ export function compileProduct<
   const Catalog extends CommandCatalog,
   const Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   const Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
->(input: CompileProductInput<Catalog, Skills, Paths>): CompiledProduct<Catalog, Skills, Paths> {
+  const Groups extends GroupCatalog = Readonly<Record<never, GroupDefinition>>,
+>(input: CompileProductInput<Catalog, Skills, Paths, Groups>): CompiledProduct<Catalog, Skills, Paths, Groups> {
   const issues: CanonConstructionIssue[] = [];
   const packageMetadata = compilePackageMetadata(input.packageMetadata, issues);
   const routes = new Map<string, string>();
   const anywhereFlags = new Map<string, { commandId: string; fieldKey: string; signature: string }>();
-  const compiled: CompiledCommand[] = [];
+  const declared: { readonly id: string; readonly definition: CommandDefinition }[] = [];
+  const fieldsById = new Map<string, readonly CompiledField[]>();
   const suppliedHandlers = isRecord(input.handlers) ? input.handlers : undefined;
   if (suppliedHandlers === undefined) {
     issues.push({
@@ -420,21 +432,25 @@ export function compileProduct<
       });
     }
 
-    compiled.push(
-      Object.freeze({
-        id: commandId,
-        route: Object.freeze([...definition.route]) as readonly [string, ...string[]],
-        summary: definition.summary,
-        visibility: definition.visibility ?? "public",
-        ...(definition.description === undefined ? {} : { description: definition.description }),
-        ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
-        fields: Object.freeze(fields),
-        definition: snapshotCommandDefinition(definition),
-      }),
-    );
+    fieldsById.set(commandId, Object.freeze(fields));
+    declared.push({ id: commandId, definition: snapshotCommandDefinition(definition) });
   }
 
-  if (issues.length > 0) throw new CanonConstructionError(issues);
+  const tree = compileCommandTree(input.groups, declared, issues);
+  if (tree === undefined || issues.length > 0) throw new CanonConstructionError(issues);
+
+  const compiled: CompiledCommand[] = commandTreeCommands(tree).map(({ id, route, definition }) =>
+    Object.freeze({
+      id,
+      route,
+      summary: definition.summary,
+      visibility: definition.visibility ?? "public",
+      ...(definition.description === undefined ? {} : { description: definition.description }),
+      ...(definition.examples === undefined ? {} : { examples: definition.examples }),
+      fields: fieldsById.get(id) ?? Object.freeze([]),
+      definition,
+    }),
+  );
 
   const skills = compileSkills(input.skills ?? ({} as Skills), compiled);
   const paths = compilePaths(input.paths ?? ({} as Paths));
@@ -442,6 +458,7 @@ export function compileProduct<
 
   const product = Object.freeze({
     name: input.name,
+    tree: tree as unknown as CommandTreeRootNode<Groups, Catalog>,
     commands: Object.freeze(compiled) as CompiledProduct<Catalog>["commands"],
     handlers,
     ...(packageMetadata === undefined ? {} : { packageMetadata }),
@@ -450,7 +467,7 @@ export function compileProduct<
       : { schemaProjectionCompleteness: input.schemaProjectionCompleteness }),
     skills,
     paths,
-  }) as CompiledProduct<Catalog, Skills, Paths>;
+  }) as CompiledProduct<Catalog, Skills, Paths, Groups>;
 
   const projectionIssues: CanonConstructionIssue[] = [];
   try {

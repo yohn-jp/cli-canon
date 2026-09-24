@@ -1,6 +1,10 @@
 export type CanonConstructionErrorCode =
   | "DUPLICATE_ROUTE"
   | "DUPLICATE_COMMAND_ID"
+  | "DUPLICATE_NODE_ID"
+  | "AMBIGUOUS_ROUTE_OWNERSHIP"
+  | "INVALID_PARENT"
+  | "INVALID_GROUP_DECLARATION"
   | "OVERLAPPING_ROUTE"
   | "FLAG_COLLISION"
   | "INVALID_FLAG"
@@ -16,6 +20,7 @@ export type CanonConstructionErrorCode =
 export interface CanonConstructionIssue {
   readonly code: CanonConstructionErrorCode;
   readonly commandId?: string;
+  readonly groupId?: string;
   readonly skillId?: string;
   readonly field?: string;
   readonly fields?: readonly string[];
