@@ -193,6 +193,18 @@ if (command === "bar") ...
 
 when the same command set already exists in Canon.
 
+### 6.1 Route groups and command tree
+
+CLI structure has one explicit vocabulary of node kinds: `root`, `group`, and `command`.
+
+- `root` is the product itself. It has no route and is not executable.
+- `group` is a non-executable route group declared with `defineGroups`. A `GroupDefinition` carries a route, a summary, and optional description, examples, and visibility. It declares no input, result, or handler.
+- `command` is an executable leaf that references exactly one `CommandDefinition` by its command ID.
+
+Group IDs are inferred from the `defineGroups` declaration keys, as command IDs are from `defineCommands`. Groups are first-class declarations rather than projection-time inference from shared route prefixes. Command grammar is still authored once in `CommandDefinition`; tree nodes reference command declarations and never copy them into a second command model. No projection-specific tree becomes an authority.
+
+Authority boundary: the consumer product owns product/domain content, including group and command IDs, route tokens, summaries, descriptions, and examples. CLI Canon owns the standard CLI structure vocabulary, the runtime, and presentation derived from it. Group metadata is generic presentation content, not product logic.
+
 ## 7. Input Canon
 
 CLI syntax and value semantics are related but distinct.

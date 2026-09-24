@@ -283,6 +283,14 @@ adapterはvalidated inputを一つのhandlerへ渡し、結果をoutput policy�
 
 Skill/exampleはcommand IDとtyped bindingsを持つ。必要値が未確定なら`template`または`requires-input`として返し、`<path>`を含む表示を実行可能commandと偽らない。command path、usage、help pointerはSkill側へ手書きしない。Inariのprerequisite付きprojectionを一般化する。[I2]
 
+### 8.5 Route groupとcommand tree
+
+CLI構造のnode種別は`root`・`group`・`command`の三つを明示する。`root`は製品自体でrouteを持たず実行不能。`group`は`defineGroups`で宣言する実行不能なroute groupで、`GroupDefinition`はroute、summary、任意のdescription/examples/visibilityを持ち、input・result・handlerを持たない。`command`は一つの`CommandDefinition`をcommand IDで参照する実行可能な葉である。
+
+group IDは`defineGroups`の宣言keyから導出する。groupはprojection時にroute prefixから推測するものではなく、第一級の宣言である。command grammarは引き続き`CommandDefinition`で一度だけauthoringし、tree nodeはcommand宣言を参照するだけで第二のcommand modelへ複製しない。projection専用のtreeをauthorityにしない。
+
+所有境界: group/command ID、route token、summary、description、examplesといった製品・domainの内容はconsumerが所有する。CLI Canonは標準のCLI構造vocabulary、runtime、それらから導出するpresentationを所有する。group metadataは汎用のpresentation内容であり、製品logicではない。
+
 ## 9. Path Canon
 
 Path Canonはfilesystemのpermission systemではなく、製品が所有するaddress規約である。
