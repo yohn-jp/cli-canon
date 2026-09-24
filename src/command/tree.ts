@@ -88,6 +88,10 @@ function compareRoutes(left: readonly string[], right: readonly string[]): numbe
   return left.length - right.length;
 }
 
+function compareIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function nodeIssueIds(entry: TreeEntry): { readonly commandId: string } | { readonly groupId: string } {
   return entry.kind === "command" ? { commandId: entry.id } : { groupId: entry.id };
 }
@@ -168,6 +172,12 @@ export function compileCommandTree(
     const key = routeKey(command.definition.route);
     if (!owners.has(key)) owners.set(key, { kind: "command", id: command.id });
   }
+  // Group structural conflicts (duplicate/ambiguous routes) are resolved in canonical
+  // route order, not declaration order, so which group is reported as the conflict is
+  // deterministic regardless of the order groups were declared in.
+  entries.sort(
+    (left, right) => compareRoutes(left.definition.route, right.definition.route) || compareIds(left.id, right.id),
+  );
   for (const group of entries) {
     if (commandIds.has(group.id)) {
       issues.push({

@@ -722,7 +722,7 @@ test("structural conflicts fail closed with deterministic structured constructio
         docs: { route: ["document"], summary: "Docs." },
       },
       issues: [
-        { code: "DUPLICATE_ROUTE", groupId: "docs", message: "docs: route duplicates group document: document" },
+        { code: "DUPLICATE_ROUTE", groupId: "document", message: "document: route duplicates group docs: document" },
       ],
     },
     {
@@ -800,4 +800,20 @@ test("structural conflicts fail closed with deterministic structured constructio
       first,
     );
   }
+});
+
+test("group structural conflicts are resolved in canonical route order, independent of declaration order", () => {
+  const declarations = {
+    document: { route: ["document"], summary: "Documents." },
+    docs: { route: ["document"], summary: "Docs." },
+  };
+  const expectedIssues = [
+    { code: "DUPLICATE_ROUTE", groupId: "document", message: "document: route duplicates group docs: document" },
+  ];
+  const forwardIssues = constructionIssues(() => treeFixture({ groups: declarations }));
+  const reversedIssues = constructionIssues(() =>
+    treeFixture({ groups: Object.fromEntries(Object.entries(declarations).reverse()) }),
+  );
+  assert.deepEqual(forwardIssues, expectedIssues);
+  assert.deepEqual(reversedIssues, expectedIssues);
 });
