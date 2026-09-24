@@ -6,6 +6,7 @@ import {
   bindHandlers,
   compileProduct,
   defineCommands,
+  defineGroups,
   flag,
   option,
   positional,
@@ -546,4 +547,273 @@ test("unsupported ordered groups and option-looking-value rejection fail during 
       error instanceof CanonConstructionError &&
       error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" && issue.field === "value"),
   );
+});
+
+function treeFixture({ reverse = false, groups: groupOverrides, commands: commandOverrides } = {}) {
+  const order = (entries) =>
+    Array.isArray(entries)
+      ? entries
+      : Object.fromEntries(reverse ? Object.entries(entries).reverse() : Object.entries(entries));
+  const commands = defineCommands(
+    order(
+      commandOverrides ?? {
+        "math.double": { route: ["math", "double"], summary: "Double.", input: {}, result: z.object({}) },
+        "document.render": { route: ["document", "render"], summary: "Render.", input: {}, result: z.object({}) },
+        "document.internal.audit": {
+          route: ["document", "internal", "audit"],
+          summary: "Audit.",
+          input: {},
+          result: z.object({}),
+        },
+      },
+    ),
+  );
+  const groups = defineGroups(
+    order(
+      groupOverrides ?? {
+        "document.internal": { route: ["document", "internal"], summary: "Internal tools.", visibility: "private" },
+        document: { route: ["document"], summary: "Work with documents.", examples: ["fixture document render"] },
+      },
+    ),
+  );
+  const handlers = Object.fromEntries(Object.keys(commands).map((id) => [id, () => ({})]));
+  return compileProduct({ name: "fixture", commands, handlers, groups });
+}
+
+function shape(node) {
+  return node.kind === "command"
+    ? { kind: node.kind, id: node.id, route: [...node.route] }
+    : node.kind === "group"
+      ? { kind: node.kind, id: node.id, route: [...node.route], children: node.children.map(shape) }
+      : { kind: node.kind, children: node.children.map(shape) };
+}
+
+function constructionIssues(build) {
+  try {
+    build();
+  } catch (error) {
+    assert.ok(error instanceof CanonConstructionError);
+    return error.issues.map((issue) => ({ ...issue }));
+  }
+  assert.fail("construction must fail");
+}
+
+test("compileProduct builds one canonical tree with nested group parentage and framework-owned order", () => {
+  const expected = {
+    kind: "root",
+    children: [
+      {
+        kind: "group",
+        id: "document",
+        route: ["document"],
+        children: [
+          {
+            kind: "group",
+            id: "document.internal",
+            route: ["document", "internal"],
+            children: [{ kind: "command", id: "document.internal.audit", route: ["document", "internal", "audit"] }],
+          },
+          { kind: "command", id: "document.render", route: ["document", "render"] },
+        ],
+      },
+      { kind: "command", id: "math.double", route: ["math", "double"] },
+    ],
+  };
+  const forward = treeFixture();
+  const reversed = treeFixture({ reverse: true });
+  assert.deepEqual(shape(forward.tree), expected);
+  assert.deepEqual(shape(reversed.tree), expected);
+
+  const [documentGroup] = forward.tree.children;
+  assert.equal(documentGroup.definition.summary, "Work with documents.");
+  assert.deepEqual(documentGroup.definition.examples, ["fixture document render"]);
+  assert.equal(documentGroup.children[0].definition.visibility, "private");
+  assert.equal(documentGroup.route, documentGroup.definition.route);
+});
+
+test("compiled command tree is immutable and snapshots group declarations", () => {
+  const groups = { document: { route: ["document"], summary: "Documents.", examples: ["fixture document render"] } };
+  const commands = defineCommands({
+    "document.render": { route: ["document", "render"], summary: "Render.", input: {}, result: z.object({}) },
+  });
+  const product = compileProduct({
+    name: "fixture",
+    commands,
+    handlers: { "document.render": () => ({}) },
+    groups,
+  });
+  groups.document.route.push("mutated");
+  groups.document.examples.push("mutated");
+  groups.document.summary = "Mutated.";
+  const [group] = product.tree.children;
+  assert.deepEqual(group.route, ["document"]);
+  assert.deepEqual(group.definition.examples, ["fixture document render"]);
+  assert.equal(group.definition.summary, "Documents.");
+  for (const value of [product.tree, product.tree.children, group, group.children, group.route, group.definition]) {
+    assert.ok(Object.isFrozen(value));
+  }
+  assert.throws(() => product.tree.children.push(group), TypeError);
+  assert.throws(() => {
+    group.children[0].id = "mutated";
+  }, TypeError);
+});
+
+test("compiled flat commands view is derived from the canonical tree", () => {
+  function treeCommands(node) {
+    return node.children.flatMap((child) => (child.kind === "command" ? [child] : treeCommands(child)));
+  }
+  for (const product of [treeFixture(), treeFixture({ reverse: true })]) {
+    const leaves = treeCommands(product.tree);
+    assert.deepEqual(
+      product.commands.map((command) => command.id),
+      ["document.internal.audit", "document.render", "math.double"],
+    );
+    assert.equal(product.commands.length, leaves.length);
+    product.commands.forEach((command, index) => {
+      assert.equal(command.id, leaves[index].id);
+      assert.equal(command.route, leaves[index].route);
+      assert.equal(command.definition, leaves[index].definition);
+      assert.equal(command.summary, leaves[index].definition.summary);
+    });
+  }
+
+  const ungrouped = fixture();
+  assert.deepEqual(shape(ungrouped.tree), {
+    kind: "root",
+    children: [
+      { kind: "command", id: "document.render", route: ["document", "render"] },
+      { kind: "command", id: "math.double", route: ["math", "double"] },
+    ],
+  });
+  assert.deepEqual(
+    ungrouped.commands.map((command) => command.definition),
+    ungrouped.tree.children.map((node) => node.definition),
+  );
+});
+
+test("structural conflicts fail closed with deterministic structured construction issues", () => {
+  const command = (route) => ({ route, summary: "Command.", input: {}, result: z.object({}) });
+  const cases = [
+    {
+      groups: { "document.render": { route: ["docs"], summary: "Docs." } },
+      issues: [
+        {
+          code: "DUPLICATE_NODE_ID",
+          groupId: "document.render",
+          commandId: "document.render",
+          message: "document.render: group ID duplicates a command ID",
+        },
+      ],
+    },
+    {
+      groups: { math: { route: ["math", "double"], summary: "Math." } },
+      issues: [
+        {
+          code: "AMBIGUOUS_ROUTE_OWNERSHIP",
+          groupId: "math",
+          commandId: "math.double",
+          message: "math: group route is also claimed by command math.double: math double",
+        },
+      ],
+    },
+    {
+      groups: {
+        document: { route: ["document"], summary: "Documents." },
+        docs: { route: ["document"], summary: "Docs." },
+      },
+      issues: [
+        { code: "DUPLICATE_ROUTE", groupId: "document", message: "document: route duplicates group docs: document" },
+      ],
+    },
+    {
+      groups: {},
+      commands: { parent: command(["tool"]), child: command(["tool", "run"]) },
+      issues: [
+        {
+          code: "INVALID_PARENT",
+          commandId: "child",
+          message: "child: route tool run is nested under command parent; commands cannot own children",
+        },
+      ],
+    },
+    {
+      groups: { nested: { route: ["math", "double", "more"], summary: "Nested." } },
+      issues: [
+        {
+          code: "INVALID_PARENT",
+          groupId: "nested",
+          message: "nested: route math double more is nested under command math.double; commands cannot own children",
+        },
+      ],
+    },
+    {
+      groups: {
+        blank: { route: ["document", " "], summary: "Blank." },
+        spaced: { route: ["two words"], summary: "Spaced." },
+        empty: { route: [], summary: "Empty." },
+      },
+      issues: ["blank", "spaced", "empty"].map((groupId) => ({
+        code: "INVALID_ROUTE",
+        groupId,
+        message: `${groupId}: route segments must be non-empty single tokens`,
+      })),
+    },
+    {
+      groups: {
+        executable: { route: ["exec"], summary: "Exec.", input: {} },
+        hidden: { route: ["hidden"], summary: "Hidden.", visibility: "hidden" },
+        broken: "not a group",
+      },
+      issues: [
+        {
+          code: "INVALID_GROUP_DECLARATION",
+          groupId: "executable",
+          message: "executable: groups are non-executable and cannot declare input",
+        },
+        {
+          code: "INVALID_GROUP_DECLARATION",
+          groupId: "hidden",
+          message: "hidden: visibility must be public or private",
+        },
+        {
+          code: "INVALID_GROUP_DECLARATION",
+          groupId: "broken",
+          message: "broken: group declaration must be an object",
+        },
+      ],
+    },
+    {
+      groups: ["not", "a", "catalog"],
+      issues: [
+        {
+          code: "INVALID_GROUP_DECLARATION",
+          message: "groups must be an object mapping group IDs to group declarations",
+        },
+      ],
+    },
+  ];
+  for (const { groups, commands, issues } of cases) {
+    const first = constructionIssues(() => treeFixture({ groups, commands }));
+    assert.deepEqual(first, issues);
+    assert.deepEqual(
+      constructionIssues(() => treeFixture({ groups, commands })),
+      first,
+    );
+  }
+});
+
+test("group structural conflicts are resolved in canonical route order, independent of declaration order", () => {
+  const declarations = {
+    document: { route: ["document"], summary: "Documents." },
+    docs: { route: ["document"], summary: "Docs." },
+  };
+  const expectedIssues = [
+    { code: "DUPLICATE_ROUTE", groupId: "document", message: "document: route duplicates group docs: document" },
+  ];
+  const forwardIssues = constructionIssues(() => treeFixture({ groups: declarations }));
+  const reversedIssues = constructionIssues(() =>
+    treeFixture({ groups: Object.fromEntries(Object.entries(declarations).reverse()) }),
+  );
+  assert.deepEqual(forwardIssues, expectedIssues);
+  assert.deepEqual(reversedIssues, expectedIssues);
 });
