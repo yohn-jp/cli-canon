@@ -1,6 +1,7 @@
 export * from "./command/model.js";
 export * from "./command/fields.js";
 export * from "./command/commands.js";
+export type * from "./command/tree.js";
 export * from "./command/handlers.js";
 export * from "./command/compiler.js";
 export * from "./command/errors.js";

@@ -10,6 +10,7 @@
     "path-canon.ts",
     "public-contract.ts",
     "invocation.ts",
+    "command-tree.ts",
     "../../src/**/*.ts"
   ]
 }
