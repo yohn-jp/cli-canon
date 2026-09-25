@@ -161,7 +161,7 @@ const handlers = bindHandlers(commands)({ "document.render": ({ out }) => ({ wri
 const product = compileProduct({ name: "fixture", commands, handlers, groups });
 const tree: CommandTreeRootNode<Groups, Commands> = product.tree;
 void tree;
-const compatibleProduct: CompiledProduct = product;
+const compatibleProduct: CompiledProduct<Commands> = product;
 void compatibleProduct;
 for (const node of product.tree.children) {
   if (node.kind === "group") {
