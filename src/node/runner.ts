@@ -7,19 +7,13 @@ import {
   type DiscoveryProjectionProduct,
   type LegacyRouteDescriptor,
 } from "../projection/discovery.js";
-import {
-  parseHelpMode,
-  projectHelp,
-  type HelpOutputMode,
-  type HelpRequest,
-  type ParsedHelpMode,
-} from "../projection/help.js";
+import { projectHelp, type HelpOutputMode, type HelpRequest, type ParsedHelpMode } from "../projection/help.js";
 import type { DomainErrorAdapter } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
 import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
-import { executeCanonicalCommand } from "../runtime/execution.js";
-import type { CanonicalCommandRequest, CanonicalExecutionOutcome } from "../runtime/model.js";
+import { executeCanonicalArgv } from "../runtime/execution.js";
+import type { CanonicalArgvBackend, CanonicalArgvParse, CanonicalExecutionOutcome } from "../runtime/model.js";
 
 export type { CliFailureKind, CliResult } from "../output/model.js";
 
@@ -162,22 +156,6 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
   command.allowExcessArguments(false);
 }
 
-interface RouteNode {
-  command: Command;
-  readonly children: Map<string, RouteNode>;
-}
-
-function childNode(parent: RouteNode, segment: string): RouteNode {
-  const existing = parent.children.get(segment);
-  if (existing !== undefined) return existing;
-  const command = parent.command.command(segment);
-  command.helpOption(false);
-  command.addHelpCommand(false);
-  const node = { command, children: new Map<string, RouteNode>() };
-  parent.children.set(segment, node);
-  return node;
-}
-
 function addAnywhereOptions<const Catalog extends CommandCatalog>(
   program: Command,
   product: CompiledProduct<Catalog>,
@@ -261,19 +239,39 @@ function usageFailure(failure: StructuredUsageFailure, maxOutputBytes: number | 
   return failureResult("usage", message, 2, maxOutputBytes);
 }
 
-function trackSelectedRoute(node: RouteNode, selected: string[]): void {
-  if (node.children.size === 0) return;
-  node.command.hook("preSubcommand", (_command, subcommand) => {
-    selected.push(subcommand.name());
-  });
-  for (const child of node.children.values()) trackSelectedRoute(child, selected);
+function silentCommand(name: string): Command {
+  const command = new Command(name);
+  command.helpOption(false);
+  command.addHelpCommand(false);
+  command.exitOverride();
+  command.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  return command;
 }
 
-/** Collects undecoded Commander tokens into a canonical request; decoding belongs to the semantic runtime. */
-function canonicalRequest(compiled: CompiledCommand, command: Command, program: Command): CanonicalCommandRequest {
+function parseWith<Value extends object>(
+  command: Command,
+  argv: readonly string[],
+  read: () => Value,
+): CanonicalArgvParse<Value, StructuredUsageFailure> {
+  try {
+    command.parse([...argv], { from: "user" });
+  } catch (error) {
+    if (error instanceof CommanderError) return { status: "failure", failure: classifyCommanderError(error) };
+    throw error;
+  }
+  return { status: "parsed", ...read() };
+}
+
+type CommanderOptions = Readonly<Record<string, unknown>>;
+
+/** Collects undecoded Commander tokens for canonical fields; decoding belongs to the semantic runtime. */
+function commandInput(
+  compiled: CompiledCommand,
+  command: Command,
+  rootOptions: CommanderOptions,
+): Readonly<Record<string, unknown>> {
   const positionals = command.processedArgs;
   const localOptions = command.opts<Record<string, unknown>>();
-  const rootOptions = program.opts<Record<string, unknown>>();
   const input: Record<string, unknown> = {};
   let positionalIndex = 0;
   for (const field of compiled.fields) {
@@ -295,7 +293,36 @@ function canonicalRequest(compiled: CompiledCommand, command: Command, program: 
       }
     }
   }
-  return { route: compiled.route, input };
+  return input;
+}
+
+/** Commander as an argv grammar backend only: it never selects commands, detects help, or decodes values. */
+function commanderBackend<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+): CanonicalArgvBackend<StructuredUsageFailure, CommanderOptions> {
+  const compiledById = new Map<string, CompiledCommand>(product.commands.map((command) => [command.id, command]));
+  return {
+    parseLeading(scope, argv) {
+      const command = silentCommand(product.name);
+      if (scope.kind === "root") addAnywhereOptions(command, product);
+      let operands: readonly string[] = [];
+      command
+        .passThroughOptions()
+        .argument("[operands...]")
+        .action((values: string[]) => {
+          operands = values;
+        });
+      return parseWith(command, argv, () => ({ operands, state: command.opts<Record<string, unknown>>() }));
+    },
+    parseCommand(node, argv, rootOptions) {
+      const compiled = compiledById.get(node.id);
+      if (compiled === undefined) throw new Error(`${node.id}: resolved command has no compiled grammar`);
+      const command = silentCommand(product.name);
+      addInputSyntax(command, compiled);
+      command.action(() => {});
+      return parseWith(command, argv, () => ({ input: commandInput(compiled, command, rootOptions) }));
+    },
+  };
 }
 
 /** Adapts a semantic runtime outcome to the Node execution contract without re-resolving or re-decoding. */
@@ -306,7 +333,7 @@ function nodeCliExecution<const Catalog extends CommandCatalog>(
     return { status: "success", commandId: outcome.commandId, result: outcome.result } as NodeCliSuccess<Catalog>;
   }
   if (outcome.failureKind === "usage") {
-    const { code, commandId, option } = outcome.usageFailure;
+    const { code, commandId, option, value } = outcome.usageFailure;
     return {
       status: "failure",
       failureKind: "usage",
@@ -314,6 +341,7 @@ function nodeCliExecution<const Catalog extends CommandCatalog>(
         code,
         ...(commandId === undefined ? {} : { commandId }),
         ...(option === undefined ? {} : { option }),
+        ...(value === undefined ? {} : { value }),
       },
     };
   }
@@ -326,52 +354,17 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
   options: ExecuteNodeCliOptions = {},
 ): Promise<NodeCliExecution<Catalog>> {
   const projection = composeCommandProjection(product, options.legacyRoutes ?? []);
-  const parsedHelp = parseHelpMode(projection, argv, options.helpFormat);
-  if (parsedHelp !== undefined) {
-    if (parsedHelp.invalidMode !== undefined) {
-      return {
-        status: "failure",
-        failureKind: "usage",
-        usageFailure: { code: "invalid-help-mode", value: parsedHelp.invalidMode },
-      };
-    }
-    return nodeCliHelp(projection, parsedHelp);
+  const outcome = await executeCanonicalArgv(product, {
+    argv,
+    backend: commanderBackend(product),
+    help: projection,
+    ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
+  });
+  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
+    return { status: "failure", failureKind: "usage", usageFailure: outcome.grammarFailure };
   }
-
-  let invocation: Promise<CanonicalExecutionOutcome<Catalog>> | undefined;
-  const selectedRoute: string[] = [];
-  const program = new Command(product.name);
-  program.helpOption(false);
-  program.addHelpCommand(false);
-  program.exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  program.enablePositionalOptions();
-  addAnywhereOptions(program, product);
-  const root: RouteNode = { command: program, children: new Map() };
-
-  for (const compiled of product.commands) {
-    let node = root;
-    for (const segment of compiled.route) node = childNode(node, segment);
-    node.command.description(compiled.summary);
-    addInputSyntax(node.command, compiled);
-    node.command.action(async (...actionArgs: unknown[]) => {
-      invocation = executeCanonicalCommand(product, canonicalRequest(compiled, actionArgs.at(-1) as Command, program));
-      await invocation;
-    });
-  }
-  trackSelectedRoute(root, selectedRoute);
-
-  try {
-    await program.parseAsync(["node", product.name, ...argv]);
-  } catch (error) {
-    if (!(error instanceof CommanderError)) return { status: "failure", failureKind: "unexpected", error };
-    // Commander reports a selected group without a subcommand as `commander.help`; the runtime classifies the route.
-    if (error.code !== "commander.help") {
-      return { status: "failure", failureKind: "usage", usageFailure: classifyCommanderError(error) };
-    }
-  }
-
-  return nodeCliExecution(await (invocation ?? executeCanonicalCommand(product, { route: selectedRoute })));
+  return nodeCliExecution(outcome);
 }
 
 export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(

@@ -8,6 +8,7 @@ import {
   composeCommandProjection,
   defineCommands,
   defineGroups,
+  executeCanonicalArgv,
   executeCanonicalCommand,
   flag,
   option,
@@ -371,6 +372,99 @@ test("Node execution delegates route resolution, required input, and decoding to
   });
 });
 
+function recordingBackend(commandInput = () => ({})) {
+  const calls = [];
+  return {
+    calls,
+    backend: {
+      parseLeading(scope, argv) {
+        calls.push(["leading", scope, [...argv]]);
+        return { status: "parsed", operands: argv, state: "root-state" };
+      },
+      parseCommand(node, argv, root) {
+        calls.push(["command", node.id, [...argv], root]);
+        return { status: "parsed", input: commandInput(argv) };
+      },
+    },
+  };
+}
+
+test("argv resolves help, command, unknown, and no-command on the canonical runtime path", async () => {
+  const { product, calls: handlerCalls } = runtimeFixture();
+  const help = composeCommandProjection(product, []);
+  const run = async (argv, commandInput) => {
+    const recording = recordingBackend(commandInput);
+    const outcome = await executeCanonicalArgv(product, { argv, backend: recording.backend, help });
+    return { outcome, calls: recording.calls };
+  };
+
+  const helpIntent = await run(["document", "render", "input.md", "-h"]);
+  assert.deepEqual(helpIntent.outcome, {
+    status: "help",
+    help: { mode: "summary", request: { kind: "command", commandId: "document.render", mode: "text" } },
+  });
+  assert.deepEqual(helpIntent.calls, [], "help intent resolves before any backend grammar parsing");
+
+  const invalidHelp = await run(["--help=brief"]);
+  assert.deepEqual(invalidHelp.outcome, {
+    status: "failure",
+    failureKind: "usage",
+    usageFailure: { code: "invalid-help-mode", route: [], value: "brief" },
+  });
+  assert.deepEqual(invalidHelp.calls, []);
+
+  const command = await run(["document", "render", "input.md"], ([file]) => ({ file, count: "3", scope: "team" }));
+  assert.deepEqual(command.outcome, {
+    status: "success",
+    commandId: "document.render",
+    route: ["document", "render"],
+    result: { file: "input.md", count: 3, scope: "team", verbose: false },
+  });
+  assert.deepEqual(command.calls, [
+    ["leading", { kind: "root" }, ["document", "render", "input.md"]],
+    ["leading", { kind: "group", route: ["document"] }, ["render", "input.md"]],
+    ["command", "document.render", ["input.md"], "root-state"],
+  ]);
+
+  const unknown = await run(["document", "missing", "input.md"]);
+  assert.deepEqual(unknown.outcome, {
+    status: "failure",
+    failureKind: "usage",
+    usageFailure: { code: "unknown-command", route: ["document", "missing"] },
+  });
+  assert.equal(
+    unknown.calls.some(([kind]) => kind === "command"),
+    false,
+  );
+
+  for (const [argv, route] of [
+    [[], []],
+    [["document"], ["document"]],
+  ]) {
+    const noCommand = await run(argv);
+    assert.deepEqual(noCommand.outcome, {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: { code: "no-command", route },
+    });
+    assert.equal(
+      noCommand.calls.some(([kind]) => kind === "command"),
+      false,
+    );
+  }
+
+  const grammar = await executeCanonicalArgv(product, {
+    argv: ["--nope"],
+    help,
+    backend: {
+      parseLeading: () => ({ status: "failure", failure: { code: "unknown-option" } }),
+      parseCommand: () => assert.fail("grammar failures stop before command parsing"),
+    },
+  });
+  assert.deepEqual(grammar, { status: "failure", failureKind: "grammar", grammarFailure: { code: "unknown-option" } });
+  assert.equal(handlerCalls.length, 1);
+});
+
 test("structured usage corpus never inspects parser messages or enters domain-error mapping", async () => {
   const { product, calls } = runtimeFixture();
   let domainErrorChecks = 0;
@@ -385,8 +479,8 @@ test("structured usage corpus never inspects parser messages or enters domain-er
     [[], { code: "no-command" }],
     [["document"], { code: "no-command" }],
     [["--scope", "team", "document"], { code: "no-command" }],
-    [["missing"], { code: "unknown-command", parserCode: "commander.unknownCommand" }],
-    [["document", "missing"], { code: "unknown-command", parserCode: "commander.unknownCommand" }],
+    [["missing"], { code: "unknown-command" }],
+    [["document", "missing"], { code: "unknown-command" }],
     [
       ["document", "render", "a", "b", "--count", "1", "--scope", "x"],
       { code: "extra-positional-argument", parserCode: "commander.excessArguments" },
