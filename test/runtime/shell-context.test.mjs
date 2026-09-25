@@ -274,11 +274,11 @@ test("--json selects machine presentation once and is removed before grammar par
 
 test("the semantic runtime resolves shell controls before the grammar backend sees argv", async () => {
   const { product, calls } = shellFixture();
-  const run = async (argv, request = {}) => {
+  const run = async (runtimeProduct, argv) => {
     const backendCalls = [];
-    const outcome = await executeCanonicalArgv(product, {
+    const outcome = await executeCanonicalArgv(runtimeProduct, {
       argv,
-      help: product,
+      help: runtimeProduct,
       backend: {
         parseLeading(scope, remaining) {
           backendCalls.push(["leading", [...remaining]]);
@@ -289,12 +289,11 @@ test("the semantic runtime resolves shell controls before the grammar backend se
           return { status: "parsed", input: {} };
         },
       },
-      ...request,
     });
     return { outcome, backendCalls };
   };
 
-  const machine = await run(["--json", "status", "--json"]);
+  const machine = await run(product, ["--json", "status", "--json"]);
   assert.deepEqual(machine.outcome, {
     status: "success",
     commandId: "status.show",
@@ -307,11 +306,12 @@ test("the semantic runtime resolves shell controls before the grammar backend se
     ["command", "status.show", []],
   ]);
 
-  const version = await run(["--version", "--json"], { packageMetadata });
+  const version = await run(product, ["--version", "--json"]);
   assert.deepEqual(version.outcome, { status: "version", packageMetadata, presentation: "machine" });
   assert.deepEqual(version.backendCalls, [], "a version request reaches no grammar backend");
 
-  const unadmitted = await run(["--version"]);
+  const { product: unversioned } = shellFixture({ withPackageMetadata: false });
+  const unadmitted = await run(unversioned, ["--version"]);
   assert.deepEqual(unadmitted.backendCalls[0], ["leading", ["--version"]]);
   assert.deepEqual(calls, [["status.show"]]);
 });
