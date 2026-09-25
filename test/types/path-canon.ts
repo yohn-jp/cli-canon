@@ -6,8 +6,9 @@ import {
   type PathParameterName,
   type PathResolutionContext,
 } from "../../src/path/index.js";
-import { bindHandlers, compileProduct } from "../../src/command/compiler.js";
+import { compileProduct } from "../../src/command/compiler.js";
 import { defineCommands } from "../../src/command/commands.js";
+import { bindHandlers } from "../../src/command/handlers.js";
 
 const paths = definePaths({
   appRoot: { root: "home", segments: [".local", "share", "app"] },
