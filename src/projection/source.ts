@@ -12,5 +12,6 @@ export interface ProjectionCommandSource {
 
 export interface ProjectionProductSource {
   readonly name: string;
+  readonly description?: string;
   readonly commands: readonly ProjectionCommandSource[];
 }

@@ -463,6 +463,7 @@ export function composeCommandSources<const Sources extends readonly CommandSour
 /** Product identity carried by the structural projection of a composed tree. */
 export interface ComposedProjectionIdentity {
   readonly name: string;
+  readonly description?: string;
   readonly packageMetadata?: ProductPackageIdentity;
 }
 
@@ -497,6 +498,7 @@ export function projectComposedCommandTree(
 ): ResolvedCommandProjection {
   return Object.freeze({
     name: identity.name,
+    ...(identity.description === undefined ? {} : { description: identity.description }),
     ...(identity.packageMetadata === undefined ? {} : { packageMetadata: identity.packageMetadata }),
     tree: Object.freeze({ children: helpTreeChildren(tree.root.children) }),
     commands: Object.freeze(composedCommands(tree.root.children)),

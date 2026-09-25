@@ -28,6 +28,7 @@ export interface CommandDiscovery {
 
 export interface ProductDiscovery {
   readonly name: string;
+  readonly description?: string;
   readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly CommandDiscovery[];
 }
@@ -39,6 +40,7 @@ export interface DiscoveryRequest {
 
 export interface DiscoveryProjectionProduct {
   readonly name: string;
+  readonly description?: string;
   readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly ProjectionCommandSource[];
   /** Resolved command tree; the help model reads route and group membership from it. */
@@ -107,6 +109,7 @@ export function projectCommandDiscovery(
 ): ProductDiscovery {
   return {
     name: product.name,
+    ...(product.description === undefined ? {} : { description: product.description }),
     ...(product.packageMetadata === undefined
       ? {}
       : { packageMetadata: projectPackageMetadata(product.packageMetadata) }),
@@ -229,6 +232,7 @@ export function composeCommandProjection(
 
   return Object.freeze({
     name: product.name,
+    ...(product.description === undefined ? {} : { description: product.description }),
     ...(product.tree === undefined ? {} : { tree: product.tree }),
     ...(product.packageMetadata === undefined
       ? {}

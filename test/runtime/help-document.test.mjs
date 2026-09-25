@@ -66,7 +66,7 @@ function kit() {
     "document.internal.audit": () => ({}),
     "math.double": () => ({}),
   });
-  return compileProduct({ name: "kit", commands, handlers, groups });
+  return compileProduct({ name: "kit", description: "Canonical document toolkit.", commands, handlers, groups });
 }
 
 const renderCommandIds = ["document.internal.audit", "document.render"];
@@ -80,6 +80,7 @@ test("root help document lists canonical tree children without inferring undecla
       productName: "kit",
       target: { kind: "root" },
       usage: ["kit", "<command>"],
+      summary: "Canonical document toolkit.",
       arguments: [],
       options: [],
       children: [
@@ -191,7 +192,12 @@ test("summary mode omits full-only content while full mode renders it", async ()
   const product = kit();
   assert.equal(
     (await runNodeCli(product, ["--help"])).stdout,
-    "Usage: kit <command>\n\nCommands:\n  document\tWork with documents.\n  math double\tDouble an integer.\n\nHelp: --help[=full|json]\n",
+    "Usage: kit <command>\n\nCanonical document toolkit.\n\nCommands:\n  document\tWork with documents.\n  math double\tDouble an integer.\n\nHelp: --help[=full|json]\n",
+  );
+  assert.equal(
+    (await runNodeCli(product, ["--help=full"])).stdout,
+    "Usage: kit <command>\n\nCanonical document toolkit.\n\nCommands:\n  document\tWork with documents.\n" +
+      "    Document commands operate on local files.\n  math double\tDouble an integer.\n\nHelp: --help[=full|json]\n",
   );
   const target = { kind: "command", id: "document.render", route: ["document", "render"] };
   const summary = projectHelpDocument(product, target, "summary");
@@ -235,6 +241,7 @@ test("JSON help is the discovery projection of the same help document", async ()
   const output = await runNodeCli(product, ["document", "internal", "audit", "--help=json"]);
   assert.deepEqual(JSON.parse(output.stdout), {
     name: "kit",
+    description: "Canonical document toolkit.",
     commands: [
       {
         id: "document.internal.audit",
@@ -298,7 +305,7 @@ test("legacy descriptors attach under the declared group owning their route pref
   );
   assert.equal(
     renderHelp(projection),
-    "Usage: kit <command>\n\nCommands:\n  document\tWork with documents.\n  math double\tDouble an integer.\n  status\tShow status.\n\nHelp: --help[=full|json]\n",
+    "Usage: kit <command>\n\nCanonical document toolkit.\n\nCommands:\n  document\tWork with documents.\n  math double\tDouble an integer.\n  status\tShow status.\n\nHelp: --help[=full|json]\n",
   );
   const json = await runNodeCli(product, ["document", "--help=json"], { legacyRoutes });
   assert.deepEqual(

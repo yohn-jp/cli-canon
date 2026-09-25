@@ -132,7 +132,13 @@ function buildHelpTree(product: HelpModelProduct): {
   const nodes = new Map<string, HelpNode>();
   const groups: HelpNode[] = [];
   const treeCommandIds = new Set<string>();
-  const root: HelpNode = { kind: "root", id: "", route: [], children: [] };
+  const root: HelpNode = {
+    kind: "root",
+    id: "",
+    route: [],
+    ...(product.description === undefined ? {} : { summary: product.description }),
+    children: [],
+  };
 
   function attach(parent: HelpNode, children: readonly HelpTreeChild[]): void {
     for (const child of children) {
