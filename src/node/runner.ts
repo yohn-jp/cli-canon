@@ -1,23 +1,19 @@
 import { Command, CommanderError, Option } from "commander";
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog, CommandId, CommandResultOutput, FieldDefinition } from "../command/model.js";
+import type { CommandCatalog, CommandId, CommandResultOutput } from "../command/model.js";
 import {
   composeCommandProjection,
   projectDiscovery,
   type DiscoveryProjectionProduct,
   type LegacyRouteDescriptor,
 } from "../projection/discovery.js";
-import {
-  parseHelpMode,
-  projectHelp,
-  type HelpOutputMode,
-  type HelpRequest,
-  type ParsedHelpMode,
-} from "../projection/help.js";
+import { projectHelp, type HelpOutputMode, type HelpRequest, type ParsedHelpMode } from "../projection/help.js";
 import type { DomainErrorAdapter } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
 import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
+import { executeCanonicalArgv } from "../runtime/execution.js";
+import type { CanonicalArgvBackend, CanonicalArgvParse, CanonicalExecutionOutcome } from "../runtime/model.js";
 
 export type { CliFailureKind, CliResult } from "../output/model.js";
 
@@ -65,7 +61,8 @@ export type NodeCliFailure =
     }
   | {
       readonly status: "failure";
-      readonly failureKind: "validation" | "handler-result" | "handler-error";
+      /** Only `handler-error` carries product errors eligible for domain-error mapping. */
+      readonly failureKind: "validation" | "handler-result" | "handler-error" | "unexpected";
       readonly error: unknown;
     };
 
@@ -148,55 +145,6 @@ function makeOption(field: CompiledField, enforceRequired = true): Option {
   return result;
 }
 
-function fieldDefinition(command: CompiledCommand, key: string): FieldDefinition {
-  const field = command.definition.input[key];
-  if (field === undefined) throw new Error(`compiled field ${command.id}.${key} has no declaration`);
-  return field;
-}
-
-async function decodeInput(
-  command: CompiledCommand,
-  raw: Readonly<Record<string, unknown>>,
-): Promise<Readonly<Record<string, unknown>>> {
-  const decoded: Record<string, unknown> = {};
-  for (const field of command.fields) {
-    const definition = fieldDefinition(command, field.key);
-    const value = raw[field.key];
-    if (definition.kind === "flag") {
-      decoded[field.key] = value === true;
-      continue;
-    }
-    if (definition.kind === "raw-args") {
-      decoded[field.key] = Array.isArray(value) ? value : [];
-      continue;
-    }
-    if (definition.kind === "option" && definition.repeatable) {
-      const values = Array.isArray(value) ? value : [];
-      const parsed: unknown[] = [];
-      for (const item of values) {
-        if (item === true && definition.valueArity === "optional") parsed.push(undefined);
-        else parsed.push(await definition.schema.parseAsync(item));
-      }
-      decoded[field.key] = parsed;
-      continue;
-    }
-    if (definition.kind === "positional" && value === undefined && !definition.required) {
-      decoded[field.key] = undefined;
-      continue;
-    }
-    if (definition.kind === "option" && value === true && definition.valueArity === "optional") {
-      decoded[field.key] = undefined;
-      continue;
-    }
-    if (value === undefined && definition.kind === "option" && !definition.required) {
-      decoded[field.key] = undefined;
-      continue;
-    }
-    decoded[field.key] = await definition.schema.parseAsync(value);
-  }
-  return decoded;
-}
-
 function addInputSyntax(command: Command, compiled: CompiledCommand): void {
   for (const field of compiled.fields) {
     if (field.kind === "positional") {
@@ -206,22 +154,6 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
     else command.addOption(makeOption(field, field.placement !== "anywhere"));
   }
   command.allowExcessArguments(false);
-}
-
-interface RouteNode {
-  command: Command;
-  readonly children: Map<string, RouteNode>;
-}
-
-function childNode(parent: RouteNode, segment: string): RouteNode {
-  const existing = parent.children.get(segment);
-  if (existing !== undefined) return existing;
-  const command = parent.command.command(segment);
-  command.helpOption(false);
-  command.addHelpCommand(false);
-  const node = { command, children: new Map<string, RouteNode>() };
-  parent.children.set(segment, node);
-  return node;
 }
 
 function addAnywhereOptions<const Catalog extends CommandCatalog>(
@@ -307,136 +239,132 @@ function usageFailure(failure: StructuredUsageFailure, maxOutputBytes: number | 
   return failureResult("usage", message, 2, maxOutputBytes);
 }
 
+function silentCommand(name: string): Command {
+  const command = new Command(name);
+  command.helpOption(false);
+  command.addHelpCommand(false);
+  command.exitOverride();
+  command.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  return command;
+}
+
+function parseWith<Value extends object>(
+  command: Command,
+  argv: readonly string[],
+  read: () => Value,
+): CanonicalArgvParse<Value, StructuredUsageFailure> {
+  try {
+    command.parse([...argv], { from: "user" });
+  } catch (error) {
+    if (error instanceof CommanderError) return { status: "failure", failure: classifyCommanderError(error) };
+    throw error;
+  }
+  return { status: "parsed", ...read() };
+}
+
+type CommanderOptions = Readonly<Record<string, unknown>>;
+
+/** Collects undecoded Commander tokens for canonical fields; decoding belongs to the semantic runtime. */
+function commandInput(
+  compiled: CompiledCommand,
+  command: Command,
+  rootOptions: CommanderOptions,
+): Readonly<Record<string, unknown>> {
+  const positionals = command.processedArgs;
+  const localOptions = command.opts<Record<string, unknown>>();
+  const input: Record<string, unknown> = {};
+  let positionalIndex = 0;
+  for (const field of compiled.fields) {
+    if (field.kind === "positional") input[field.key] = positionals[positionalIndex++];
+    else if (field.kind === "raw-args") input[field.key] = positionals[positionalIndex] ?? [];
+    else {
+      const key = commanderKey(field);
+      const local = localOptions[key];
+      const rootValue = rootOptions[key];
+      if (field.kind === "option" && field.repeatable === true) {
+        input[field.key] = [
+          ...(Array.isArray(rootValue) ? rootValue : rootValue === undefined ? [] : [rootValue]),
+          ...(Array.isArray(local) ? local : local === undefined ? [] : [local]),
+        ];
+      } else if (field.kind === "flag") {
+        input[field.key] = local === true || rootValue === true;
+      } else {
+        input[field.key] = local ?? rootValue;
+      }
+    }
+  }
+  return input;
+}
+
+/** Commander as an argv grammar backend only: it never selects commands, detects help, or decodes values. */
+function commanderBackend<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+): CanonicalArgvBackend<StructuredUsageFailure, CommanderOptions> {
+  const compiledById = new Map<string, CompiledCommand>(product.commands.map((command) => [command.id, command]));
+  return {
+    parseLeading(scope, argv) {
+      const command = silentCommand(product.name);
+      if (scope.kind === "root") addAnywhereOptions(command, product);
+      let operands: readonly string[] = [];
+      command
+        .passThroughOptions()
+        .argument("[operands...]")
+        .action((values: string[]) => {
+          operands = values;
+        });
+      return parseWith(command, argv, () => ({ operands, state: command.opts<Record<string, unknown>>() }));
+    },
+    parseCommand(node, argv, rootOptions) {
+      const compiled = compiledById.get(node.id);
+      if (compiled === undefined) throw new Error(`${node.id}: resolved command has no compiled grammar`);
+      const command = silentCommand(product.name);
+      addInputSyntax(command, compiled);
+      command.action(() => {});
+      return parseWith(command, argv, () => ({ input: commandInput(compiled, command, rootOptions) }));
+    },
+  };
+}
+
+/** Adapts a semantic runtime outcome to the Node execution contract without re-resolving or re-decoding. */
+function nodeCliExecution<const Catalog extends CommandCatalog>(
+  outcome: CanonicalExecutionOutcome<Catalog>,
+): NodeCliExecution<Catalog> {
+  if (outcome.status === "success") {
+    return { status: "success", commandId: outcome.commandId, result: outcome.result } as NodeCliSuccess<Catalog>;
+  }
+  if (outcome.failureKind === "usage") {
+    const { code, commandId, option, value } = outcome.usageFailure;
+    return {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: {
+        code,
+        ...(commandId === undefined ? {} : { commandId }),
+        ...(option === undefined ? {} : { option }),
+        ...(value === undefined ? {} : { value }),
+      },
+    };
+  }
+  return { status: "failure", failureKind: outcome.failureKind, error: outcome.error };
+}
+
 export async function executeNodeCli<const Catalog extends CommandCatalog>(
   product: CompiledProduct<Catalog>,
   argv: readonly string[],
   options: ExecuteNodeCliOptions = {},
 ): Promise<NodeCliExecution<Catalog>> {
   const projection = composeCommandProjection(product, options.legacyRoutes ?? []);
-  const parsedHelp = parseHelpMode(projection, argv, options.helpFormat);
-  if (parsedHelp !== undefined) {
-    if (parsedHelp.invalidMode !== undefined) {
-      return {
-        status: "failure",
-        failureKind: "usage",
-        usageFailure: { code: "invalid-help-mode", value: parsedHelp.invalidMode },
-      };
-    }
-    return nodeCliHelp(projection, parsedHelp);
+  const outcome = await executeCanonicalArgv(product, {
+    argv,
+    backend: commanderBackend(product),
+    help: projection,
+    ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
+  });
+  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
+    return { status: "failure", failureKind: "usage", usageFailure: outcome.grammarFailure };
   }
-
-  let invocation: Promise<NodeCliExecution<Catalog>> | undefined;
-  const program = new Command(product.name);
-  program.helpOption(false);
-  program.addHelpCommand(false);
-  program.exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  program.enablePositionalOptions();
-  addAnywhereOptions(program, product);
-  const root: RouteNode = { command: program, children: new Map() };
-
-  for (const compiled of product.commands) {
-    let node = root;
-    for (const segment of compiled.route) node = childNode(node, segment);
-    node.command.description(compiled.summary);
-    addInputSyntax(node.command, compiled);
-    node.command.action(async (...actionArgs: unknown[]) => {
-      invocation = (async () => {
-        try {
-          const command = actionArgs.at(-1) as Command;
-          const positionals = command.processedArgs;
-          const localOptions = command.opts<Record<string, unknown>>();
-          const rootOptions = program.opts<Record<string, unknown>>();
-          const raw: Record<string, unknown> = {};
-          let positionalIndex = 0;
-          for (const field of compiled.fields) {
-            if (field.kind === "positional") raw[field.key] = positionals[positionalIndex++];
-            else if (field.kind === "raw-args") raw[field.key] = positionals[positionalIndex] ?? [];
-            else {
-              const key = commanderKey(field);
-              const local = localOptions[key];
-              const rootValue = rootOptions[key];
-              if (field.kind === "option" && field.repeatable === true) {
-                raw[field.key] = [
-                  ...(Array.isArray(rootValue) ? rootValue : rootValue === undefined ? [] : [rootValue]),
-                  ...(Array.isArray(local) ? local : local === undefined ? [] : [local]),
-                ];
-              } else if (field.kind === "flag") {
-                raw[field.key] = local === true || rootValue === true;
-              } else {
-                raw[field.key] = local ?? rootValue;
-              }
-            }
-          }
-
-          const missingRequiredOption = compiled.fields.find((field) => {
-            if (field.kind !== "option" || field.required !== true) return false;
-            const value = raw[field.key];
-            return field.repeatable === true ? !Array.isArray(value) || value.length === 0 : value === undefined;
-          });
-          if (missingRequiredOption !== undefined) {
-            return {
-              status: "failure",
-              failureKind: "usage",
-              usageFailure: {
-                code: "missing-required-option",
-                commandId: compiled.id,
-                ...(missingRequiredOption.flag === undefined ? {} : { option: missingRequiredOption.flag }),
-              },
-            };
-          }
-
-          let decoded: Readonly<Record<string, unknown>>;
-          try {
-            decoded = await decodeInput(compiled, raw);
-          } catch (error) {
-            return { status: "failure", failureKind: "validation", error };
-          }
-
-          const handler = product.handlers[compiled.id as keyof Catalog] as (
-            input: Readonly<Record<string, unknown>>,
-          ) => unknown;
-          let rawResult: unknown;
-          try {
-            rawResult = await handler(decoded);
-          } catch (error) {
-            return { status: "failure", failureKind: "handler-error", error };
-          }
-          let result;
-          try {
-            result = await compiled.definition.result.parseAsync(rawResult);
-          } catch (error) {
-            return { status: "failure", failureKind: "handler-result", error };
-          }
-          return { status: "success", commandId: compiled.id, result };
-        } catch (error) {
-          return { status: "failure", failureKind: "handler-error", error };
-        }
-      })();
-      await invocation;
-    });
-  }
-
-  try {
-    await program.parseAsync(["node", product.name, ...argv]);
-  } catch (error) {
-    if (error instanceof CommanderError) {
-      if (error.code === "commander.helpDisplayed") {
-        const rootHelp = parseHelpMode(projection, ["--help"], options.helpFormat);
-        if (rootHelp !== undefined) return nodeCliHelp(projection, rootHelp);
-      }
-      return { status: "failure", failureKind: "usage", usageFailure: classifyCommanderError(error) };
-    }
-    return { status: "failure", failureKind: "handler-error", error };
-  }
-
-  return invocation === undefined
-    ? {
-        status: "failure",
-        failureKind: "usage",
-        usageFailure: { code: "no-command", parserCode: "canon.noCommandSelected" },
-      }
-    : await invocation;
+  return nodeCliExecution(outcome);
 }
 
 export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(
@@ -473,6 +401,11 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
   if (execution.failureKind === "handler-result") {
     return toCliResult(
       failureResult("handler-result", `INVALID_HANDLER_RESULT: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
+    );
+  }
+  if (execution.failureKind === "unexpected") {
+    return toCliResult(
+      failureResult("unexpected", `UNEXPECTED: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
     );
   }
 

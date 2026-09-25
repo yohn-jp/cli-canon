@@ -1,7 +1,10 @@
 import type { CommandCatalog, CommandDefinition, CommandId, FieldDefinition } from "../command/model.js";
 import type { CommandTreeChildNode, CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
+import { parseHelpMode } from "../projection/help.js";
 import {
   CanonicalRequestError,
+  type CanonicalArgvOutcome,
+  type CanonicalArgvRequest,
   type CanonicalCommandRequest,
   type CanonicalExecutionOutcome,
   type CanonicalRuntimeProduct,
@@ -153,9 +156,17 @@ export async function executeCanonicalCommand<const Catalog extends CommandCatal
     };
   }
 
-  const node = resolution.node;
+  return executeCommandNode(product, resolution.node, route, request.input ?? {});
+}
+
+/** Validates, decodes, and executes request tokens against an already resolved command node. */
+async function executeCommandNode<const Catalog extends CommandCatalog>(
+  product: CanonicalRuntimeProduct<Catalog>,
+  node: CommandTreeCommandNode,
+  route: readonly string[],
+  input: unknown,
+): Promise<CanonicalExecutionOutcome<Catalog>> {
   const commandId = node.id as CommandId<Catalog>;
-  const input = request.input ?? {};
   try {
     assertRequestTokens(node.definition, input);
   } catch (error) {
@@ -205,4 +216,101 @@ export async function executeCanonicalCommand<const Catalog extends CommandCatal
     route: node.route,
     result,
   }) as CanonicalExecutionOutcome<Catalog>;
+}
+
+type ArgvRouteResolution<Failure, RootState> =
+  | {
+      readonly kind: "command";
+      readonly node: CommandTreeCommandNode;
+      readonly route: readonly string[];
+      readonly tail: readonly string[];
+      readonly root: RootState;
+    }
+  | { readonly kind: "usage"; readonly usageFailure: CanonicalUsageFailure }
+  | { readonly kind: "grammar"; readonly failure: Failure };
+
+/**
+ * Resolves the command route from argv operands against the compiled canonical tree.
+ *
+ * The backend parses the options preceding each route operand; the runtime alone matches
+ * operands to route segments and classifies unknown and incomplete routes.
+ */
+function resolveArgvRoute<Failure, RootState>(
+  tree: CommandTreeRootNode,
+  request: CanonicalArgvRequest<Failure, RootState>,
+): ArgvRouteResolution<Failure, RootState> {
+  const leading = request.backend.parseLeading({ kind: "root" }, request.argv);
+  if (leading.status === "failure") return { kind: "grammar", failure: leading.failure };
+  const root = leading.state;
+  let operands = leading.operands;
+  let candidates: readonly CommandTreeChildNode[] = tree.children;
+  const route: string[] = [];
+  for (;;) {
+    if (route.length > 0) {
+      const scoped = request.backend.parseLeading({ kind: "group", route: Object.freeze([...route]) }, operands);
+      if (scoped.status === "failure") return { kind: "grammar", failure: scoped.failure };
+      operands = scoped.operands;
+    }
+    const segment = operands[0];
+    if (segment === undefined) {
+      return { kind: "usage", usageFailure: { code: "no-command", route: Object.freeze([...route]) } };
+    }
+    const depth = route.length;
+    route.push(segment);
+    operands = operands.slice(1);
+    const matches = candidates.filter((child) => child.route[depth] === segment);
+    if (matches.length === 0) {
+      return { kind: "usage", usageFailure: { code: "unknown-command", route: Object.freeze(route) } };
+    }
+    const exact = matches.find((child) => child.route.length === route.length);
+    if (exact?.kind === "command") {
+      return { kind: "command", node: exact, route: Object.freeze(route), tail: operands, root };
+    }
+    candidates = exact?.kind === "group" ? exact.children : matches;
+  }
+}
+
+/**
+ * Executes one argv invocation through the canonical runtime path.
+ *
+ * Help intent, route/command resolution, and unknown/no-command classification are
+ * owned here; the backend only parses argv grammar. A resolved command is executed
+ * without re-resolving its route.
+ */
+export async function executeCanonicalArgv<const Catalog extends CommandCatalog, Failure, RootState = unknown>(
+  product: CanonicalRuntimeProduct<Catalog>,
+  request: CanonicalArgvRequest<Failure, RootState>,
+): Promise<CanonicalArgvOutcome<Catalog, Failure>> {
+  let resolution: ArgvRouteResolution<Failure, RootState>;
+  try {
+    const help = parseHelpMode(request.help, request.argv, request.helpFormat);
+    if (help !== undefined) {
+      if (help.invalidMode === undefined) return { status: "help", help };
+      return {
+        status: "failure",
+        failureKind: "usage",
+        usageFailure: { code: "invalid-help-mode", route: Object.freeze([]), value: help.invalidMode },
+      };
+    }
+    resolution = resolveArgvRoute(product.tree as unknown as CommandTreeRootNode, request);
+  } catch (error) {
+    return { status: "failure", failureKind: "unexpected", error };
+  }
+  if (resolution.kind === "grammar") {
+    return { status: "failure", failureKind: "grammar", grammarFailure: resolution.failure };
+  }
+  if (resolution.kind === "usage") {
+    return { status: "failure", failureKind: "usage", usageFailure: resolution.usageFailure };
+  }
+
+  let parsed: ReturnType<CanonicalArgvRequest<Failure, RootState>["backend"]["parseCommand"]>;
+  try {
+    parsed = request.backend.parseCommand(resolution.node, resolution.tail, resolution.root);
+  } catch (error) {
+    return { status: "failure", failureKind: "unexpected", commandId: resolution.node.id as CommandId<Catalog>, error };
+  }
+  if (parsed.status === "failure") {
+    return { status: "failure", failureKind: "grammar", grammarFailure: parsed.failure };
+  }
+  return executeCommandNode(product, resolution.node, resolution.route, parsed.input);
 }

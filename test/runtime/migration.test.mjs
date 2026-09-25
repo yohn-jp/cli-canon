@@ -8,6 +8,9 @@ import {
   composeCommandProjection,
   defineCommands,
   defineGroups,
+  executeCanonicalArgv,
+  executeCanonicalCommand,
+  flag,
   option,
   parseHelpMode,
   projectHelp,
@@ -290,4 +293,274 @@ test("parser failures carry source classification and project to stable terminal
     stderr: "Unknown help mode: brief\n",
     failureKind: "usage",
   });
+});
+
+function runtimeFixture() {
+  const calls = [];
+  const commands = defineCommands({
+    "document.render": {
+      route: ["document", "render"],
+      summary: "Render one document.",
+      input: {
+        file: positional(z.string().min(1)),
+        count: option("--count", z.coerce.number().int(), { required: true }),
+        scope: option("--scope", z.string(), { required: true, placement: "anywhere" }),
+        verbose: flag("--verbose"),
+      },
+      result: z.object({ file: z.string(), count: z.number(), scope: z.string(), verbose: z.boolean() }),
+    },
+  });
+  const groups = defineGroups({ document: { route: ["document"], summary: "Work with documents." } });
+  const product = compileProduct({
+    name: "fixture",
+    commands,
+    groups,
+    handlers: bindHandlers(commands)({
+      "document.render": (input) => {
+        calls.push(input);
+        return input;
+      },
+    }),
+  });
+  return { product, calls };
+}
+
+test("Node execution delegates route resolution, required input, and decoding to the semantic runtime", async () => {
+  const { product, calls } = runtimeFixture();
+  const request = {
+    route: ["document", "render"],
+    input: { file: "input.md", count: "3", scope: "team", verbose: true },
+  };
+
+  const execution = await executeNodeCli(product, [
+    "--scope",
+    "team",
+    "document",
+    "render",
+    "input.md",
+    "--count",
+    "3",
+    "--verbose",
+  ]);
+  const canonical = await executeCanonicalCommand(product, request);
+  assert.equal(canonical.status, "success");
+  assert.deepEqual(execution, { status: "success", commandId: canonical.commandId, result: canonical.result });
+  assert.deepEqual(calls, [
+    { file: "input.md", count: 3, scope: "team", verbose: true },
+    { file: "input.md", count: 3, scope: "team", verbose: true },
+  ]);
+
+  calls.length = 0;
+  const invalid = await executeNodeCli(product, [
+    "document",
+    "render",
+    "input.md",
+    "--count",
+    "many",
+    "--scope",
+    "team",
+  ]);
+  assert.equal(invalid.status, "failure");
+  assert.equal(invalid.failureKind, "validation");
+  assert.deepEqual(calls, [], "decode failures stop before the handler");
+
+  const missingAnywhere = await executeNodeCli(product, ["document", "render", "input.md", "--count", "3"]);
+  assert.deepEqual(missingAnywhere, {
+    status: "failure",
+    failureKind: "usage",
+    usageFailure: { code: "missing-required-option", commandId: "document.render", option: "--scope" },
+  });
+});
+
+function recordingBackend(commandInput = () => ({})) {
+  const calls = [];
+  return {
+    calls,
+    backend: {
+      parseLeading(scope, argv) {
+        calls.push(["leading", scope, [...argv]]);
+        return { status: "parsed", operands: argv, state: "root-state" };
+      },
+      parseCommand(node, argv, root) {
+        calls.push(["command", node.id, [...argv], root]);
+        return { status: "parsed", input: commandInput(argv) };
+      },
+    },
+  };
+}
+
+test("argv resolves help, command, unknown, and no-command on the canonical runtime path", async () => {
+  const { product, calls: handlerCalls } = runtimeFixture();
+  const help = composeCommandProjection(product, []);
+  const run = async (argv, commandInput) => {
+    const recording = recordingBackend(commandInput);
+    const outcome = await executeCanonicalArgv(product, { argv, backend: recording.backend, help });
+    return { outcome, calls: recording.calls };
+  };
+
+  const helpIntent = await run(["document", "render", "input.md", "-h"]);
+  assert.deepEqual(helpIntent.outcome, {
+    status: "help",
+    help: { mode: "summary", request: { kind: "command", commandId: "document.render", mode: "text" } },
+  });
+  assert.deepEqual(helpIntent.calls, [], "help intent resolves before any backend grammar parsing");
+
+  const invalidHelp = await run(["--help=brief"]);
+  assert.deepEqual(invalidHelp.outcome, {
+    status: "failure",
+    failureKind: "usage",
+    usageFailure: { code: "invalid-help-mode", route: [], value: "brief" },
+  });
+  assert.deepEqual(invalidHelp.calls, []);
+
+  const command = await run(["document", "render", "input.md"], ([file]) => ({ file, count: "3", scope: "team" }));
+  assert.deepEqual(command.outcome, {
+    status: "success",
+    commandId: "document.render",
+    route: ["document", "render"],
+    result: { file: "input.md", count: 3, scope: "team", verbose: false },
+  });
+  assert.deepEqual(command.calls, [
+    ["leading", { kind: "root" }, ["document", "render", "input.md"]],
+    ["leading", { kind: "group", route: ["document"] }, ["render", "input.md"]],
+    ["command", "document.render", ["input.md"], "root-state"],
+  ]);
+
+  const unknown = await run(["document", "missing", "input.md"]);
+  assert.deepEqual(unknown.outcome, {
+    status: "failure",
+    failureKind: "usage",
+    usageFailure: { code: "unknown-command", route: ["document", "missing"] },
+  });
+  assert.equal(
+    unknown.calls.some(([kind]) => kind === "command"),
+    false,
+  );
+
+  for (const [argv, route] of [
+    [[], []],
+    [["document"], ["document"]],
+  ]) {
+    const noCommand = await run(argv);
+    assert.deepEqual(noCommand.outcome, {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: { code: "no-command", route },
+    });
+    assert.equal(
+      noCommand.calls.some(([kind]) => kind === "command"),
+      false,
+    );
+  }
+
+  const grammar = await executeCanonicalArgv(product, {
+    argv: ["--nope"],
+    help,
+    backend: {
+      parseLeading: () => ({ status: "failure", failure: { code: "unknown-option" } }),
+      parseCommand: () => assert.fail("grammar failures stop before command parsing"),
+    },
+  });
+  assert.deepEqual(grammar, { status: "failure", failureKind: "grammar", grammarFailure: { code: "unknown-option" } });
+  assert.equal(handlerCalls.length, 1);
+});
+
+test("structured usage corpus never inspects parser messages or enters domain-error mapping", async () => {
+  const { product, calls } = runtimeFixture();
+  let domainErrorChecks = 0;
+  const domainAdapter = {
+    is: () => {
+      domainErrorChecks += 1;
+      return true;
+    },
+    map: () => ({ exitCode: 9, stream: "stderr", output: "domain\n" }),
+  };
+  const cases = [
+    [[], { code: "no-command" }],
+    [["document"], { code: "no-command" }],
+    [["--scope", "team", "document"], { code: "no-command" }],
+    [["missing"], { code: "unknown-command" }],
+    [["document", "missing"], { code: "unknown-command" }],
+    [
+      ["document", "render", "a", "b", "--count", "1", "--scope", "x"],
+      { code: "extra-positional-argument", parserCode: "commander.excessArguments" },
+    ],
+    [
+      ["document", "render", "a", "--count", "1", "--scope", "x", "--nope"],
+      { code: "unknown-option", parserCode: "commander.unknownOption" },
+    ],
+    [
+      ["document", "render", "a", "--scope", "x", "--count"],
+      { code: "missing-option-value", parserCode: "commander.optionMissingArgument" },
+    ],
+    [
+      ["document", "render", "a", "--scope", "x"],
+      { code: "missing-required-option", parserCode: "commander.missingMandatoryOptionValue" },
+    ],
+    [
+      ["document", "render", "--count", "1", "--scope", "x"],
+      { code: "missing-positional-argument", parserCode: "commander.missingArgument" },
+    ],
+    [["document", "render", "--help=brief"], { code: "invalid-help-mode", value: "brief" }],
+  ];
+
+  for (const [argv, usageFailure] of cases) {
+    const execution = await executeNodeCli(product, argv);
+    assert.deepEqual(execution, { status: "failure", failureKind: "usage", usageFailure }, argv.join(" "));
+    const terminal = projectNodeCliExecution(execution, { domainErrorAdapter: domainAdapter });
+    assert.equal(terminal.exitCode, 2, argv.join(" "));
+    assert.equal(terminal.failureKind, "usage", argv.join(" "));
+  }
+  assert.equal(domainErrorChecks, 0, "usage failures never enter domain error mapping");
+  assert.deepEqual(calls, []);
+});
+
+test("help intent resolves on one Canon path at any token placement without invoking handlers", async () => {
+  const { product, calls } = runtimeFixture();
+  const cases = [
+    [["-h"], { kind: "root", mode: "text" }, "summary"],
+    [["document", "--help"], { kind: "route", route: ["document"], mode: "text" }, "summary"],
+    [["--help=full", "document", "render"], { kind: "command", commandId: "document.render", mode: "full" }, "full"],
+    [
+      ["document", "render", "input.md", "--count", "3", "-h"],
+      { kind: "command", commandId: "document.render", mode: "text" },
+      "summary",
+    ],
+    [
+      ["--scope", "team", "document", "render", "--help=json"],
+      { kind: "command", commandId: "document.render", mode: "text" },
+      "json",
+    ],
+  ];
+  for (const [argv, request, mode] of cases) {
+    const execution = await executeNodeCli(product, argv);
+    assert.equal(execution.status, "help", argv.join(" "));
+    assert.equal(execution.mode, mode, argv.join(" "));
+    assert.deepEqual(execution.request, request, argv.join(" "));
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("framework failures outside handlers project as unexpected without domain-error mapping", async () => {
+  const commands = defineCommands({
+    read: { route: ["read"], summary: "Read.", input: {}, result: z.object({}) },
+  });
+  const product = compileProduct({ name: "fixture", commands, handlers: bindHandlers(commands)({ read: () => ({}) }) });
+  const unbound = { ...product, handlers: {} };
+  let domainErrorChecks = 0;
+  const execution = await executeNodeCli(unbound, ["read"]);
+  assert.equal(execution.status, "failure");
+  assert.equal(execution.failureKind, "unexpected");
+  const terminal = projectNodeCliExecution(execution, {
+    domainErrorAdapter: {
+      is: () => {
+        domainErrorChecks += 1;
+        return true;
+      },
+      map: () => ({ exitCode: 9, stream: "stderr", output: "domain\n" }),
+    },
+  });
+  assert.equal(terminal.failureKind, "unexpected");
+  assert.equal(terminal.exitCode, 1);
+  assert.equal(domainErrorChecks, 0);
 });
