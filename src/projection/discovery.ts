@@ -41,11 +41,18 @@ export interface DiscoveryProjectionProduct {
   readonly name: string;
   readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly ProjectionCommandSource[];
-  /** Canonical command tree; the help model reads declared groups from it. */
+  /** Resolved command tree; the help model reads route and group membership from it. */
   readonly tree?: HelpTreeSource;
 }
 
-/** Bounded presentation metadata for one route that is still owned by a consumer. */
+/**
+ * Bounded presentation metadata for one route that is still owned by a consumer.
+ *
+ * @deprecated Declare the route in a `DelegatedCommandSource`, compose it with
+ * `composeCommandSources`, and project the result with
+ * `projectComposedCommandTree`. Node consumers should pass the executable
+ * delegated source through `delegatedSources`.
+ */
 export interface LegacyRouteDescriptor {
   readonly id: string;
   readonly route: readonly [string, ...string[]];
@@ -55,7 +62,11 @@ export interface LegacyRouteDescriptor {
   readonly fields: readonly CompiledField[];
 }
 
-export interface ComposedCommandProjection extends DiscoveryProjectionProduct {}
+/** Structural help/discovery input projected from a resolved command tree. */
+export interface ResolvedCommandProjection extends DiscoveryProjectionProduct {}
+
+/** @deprecated Use `ResolvedCommandProjection` from `projectComposedCommandTree`. */
+export interface ComposedCommandProjection extends ResolvedCommandProjection {}
 
 function projectPackageMetadata(packageMetadata: ProductPackageIdentity): ProductPackageIdentity {
   return {
@@ -138,9 +149,14 @@ function routesOverlap(left: readonly string[], right: readonly string[]): boole
 }
 
 /**
- * Combines Canon-owned routes with bounded descriptors for routes still owned
- * by a consumer. Shared parent groups are allowed; one route cannot own or
- * overlap another route's leaf.
+ * Compatibility projection for the 0.1.7 legacy-route migration surface.
+ *
+ * @deprecated `composeCommandProjection` is a 0.1.7 compatibility API.
+ * Declare consumer-owned routes in a `DelegatedCommandSource`,
+ * compose all sources with `composeCommandSources`, and pass the resolved tree
+ * to `projectComposedCommandTree`. Node consumers should pass executable
+ * delegated sources through `delegatedSources` instead of describing routes
+ * separately for help.
  */
 export function composeCommandProjection(
   product: DiscoveryProjectionProduct,

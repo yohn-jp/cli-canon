@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -22,6 +22,9 @@ import {
   composeCommandSources,
   defineCommands,
   defineGroups,
+  projectComposedCommandTree,
+  projectHelp,
+  renderHelp,
   type CanonicalCommandSource,
   type CommandSource,
   type CommandSourceId,
@@ -54,6 +57,17 @@ const delegated: DelegatedCommandSource<"external"> = {
 };
 const sources = [canonical, delegated] as const;
 const composed: ComposedCommandTree<CommandSourceId<typeof sources>> = composeCommandSources(sources);
+const projection = projectComposedCommandTree(composed, { name: "packed" });
+const reversedProjection = projectComposedCommandTree(composeCommandSources([delegated, canonical]), { name: "packed" });
+if (renderHelp(projection) !== renderHelp(reversedProjection)) throw new Error("help order must not depend on source order");
+if (!renderHelp(projection, { kind: "route", route: ["document"] }).includes("convert")) {
+  throw new Error("group help must include delegated children");
+}
+const discovery = projectHelp(projection, { mode: "json", request: { kind: "root" } });
+if (typeof discovery === "string") throw new Error("JSON help must produce discovery data");
+if (discovery.commands.map(({ id }) => id).join(",") !== "external.convert,document.render") {
+  throw new Error("JSON discovery must include all resolved children in deterministic order");
+}
 // @ts-expect-error source IDs are inferred from the declared sources.
 const unknownSource: CommandSourceId<typeof sources> = "other";
 void unknownSource;
@@ -94,6 +108,15 @@ test("packed package exposes generic command-source composition types and runtim
     const installed = path.join(consumer, "node_modules", "@yohn-jp", "cli-canon");
     mkdirSync(installed, { recursive: true });
     run("tar", ["-xzf", path.join(packDir, archives[0]), "-C", installed, "--strip-components=1"]);
+    const discoveryTypes = readFileSync(path.join(installed, "dist", "projection", "discovery.d.ts"), "utf8");
+    const nodeTypes = readFileSync(path.join(installed, "dist", "node", "runner.d.ts"), "utf8");
+    assert.match(discoveryTypes, /@deprecated[\s\S]*?export interface LegacyRouteDescriptor/u);
+    assert.match(
+      discoveryTypes,
+      /@deprecated `composeCommandProjection` is a 0\.1\.7 compatibility API\.[\s\S]*?export declare function composeCommandProjection/u,
+    );
+    assert.match(nodeTypes, /@deprecated[\s\S]{0,240}legacyRoutes/u);
+    assert.match(discoveryTypes, /export interface ResolvedCommandProjection/u);
     for (const dependency of ["zod", "commander"]) {
       symlinkSync(path.join(root, "node_modules", dependency), path.join(consumer, "node_modules", dependency), "dir");
     }

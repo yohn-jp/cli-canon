@@ -689,6 +689,53 @@ function composedFixture({ executorThrows = false } = {}) {
   return { product, delegated, handlerCalls, executorCalls };
 }
 
+test("incremental delegated sources project root, group, command, and JSON help from the resolved tree", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  const canonical = { kind: "canonical", id: product.name, product };
+  const projection = projectComposedCommandTree(composeCommandSources([canonical, delegated]), { name: product.name });
+  const reversedProjection = projectComposedCommandTree(composeCommandSources([delegated, canonical]), {
+    name: product.name,
+  });
+
+  const root = renderHelp(projection);
+  assert.match(root, /architecture\tBrowse architecture examples\./);
+  assert.match(root, /auth\tManage sign-in\./);
+  assert.equal(root, renderHelp(reversedProjection), "source declaration order does not change help order");
+
+  const group = renderHelp(projection, { kind: "route", route: ["architecture"] });
+  assert.match(group, /example\tShow an architecture example\./);
+  assert.match(group, /zones\tList architecture zones\./);
+  assert.match(
+    renderHelp(projection, { kind: "command", commandId: "external.architecture.zones" }),
+    /fixture architecture zones/,
+  );
+
+  const parsedGroupJson = parseHelpMode(projection, ["architecture", "--help=json"]);
+  assert.equal(parsedGroupJson?.mode, "json");
+  assert.deepEqual(
+    projectHelp(projection, parsedGroupJson).commands.map(({ id }) => id),
+    ["architecture.example", "external.architecture.zones"],
+  );
+  const rootJson = projectHelp(projection, parseHelpMode(projection, ["--help=json"]));
+  assert.deepEqual(
+    rootJson.commands.map(({ id }) => id),
+    ["architecture.example", "external.architecture.zones", "external.auth.login"],
+  );
+
+  assert.deepEqual(handlerCalls, [], "projection does not invoke canonical handlers");
+  assert.deepEqual(executorCalls, [], "projection does not invoke delegated executors");
+
+  const runtimeGroup = await runNodeCli(product, ["architecture", "--help"], { delegatedSources: [delegated] });
+  assert.match(runtimeGroup.stdout, /zones\tList architecture zones\./);
+  const runtimeJson = await runNodeCli(product, ["--help=json"], { delegatedSources: [delegated] });
+  assert.deepEqual(
+    JSON.parse(runtimeJson.stdout).commands.map(({ id }) => id),
+    ["architecture.example", "external.architecture.zones", "external.auth.login"],
+  );
+  assert.deepEqual(handlerCalls, [], "runtime help does not invoke canonical handlers");
+  assert.deepEqual(executorCalls, [], "runtime help does not invoke delegated executors");
+});
+
 test("composed dispatch executes Canon-owned routes through the semantic runtime only", async () => {
   const { product, delegated, handlerCalls, executorCalls } = composedFixture();
   const execution = await executeNodeCli(product, ["architecture", "example", "--format=full"], {
