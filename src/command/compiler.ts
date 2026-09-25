@@ -63,6 +63,7 @@ export interface CompileProductInput<
   Groups extends GroupCatalog = Readonly<Record<never, GroupDefinition>>,
 > {
   readonly name: string;
+  readonly description?: string;
   readonly commands: Catalog;
   /** Non-executable route groups compiled into the canonical command tree. */
   readonly groups?: Groups;
@@ -82,6 +83,7 @@ export interface CompiledProduct<
   Groups extends GroupCatalog = GroupCatalog,
 > {
   readonly name: string;
+  readonly description?: string;
   /** The one canonical structural authority for groups and commands. */
   readonly tree: CommandTreeRootNode<Groups, Catalog>;
   /** Compatibility flat view derived from the canonical tree in depth-first order. */
@@ -458,6 +460,7 @@ export function compileProduct<
 
   const product = Object.freeze({
     name: input.name,
+    ...(input.description === undefined ? {} : { description: input.description }),
     tree: tree as unknown as CommandTreeRootNode<Groups, Catalog>,
     commands: Object.freeze(compiled) as CompiledProduct<Catalog>["commands"],
     handlers,
