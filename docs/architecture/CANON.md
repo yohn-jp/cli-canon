@@ -311,6 +311,12 @@ Machine-readable output must remain structurally valid. Never truncate JSON byte
 
 Do not silently convert a failed projection into exit code 0.
 
+### 11.1 Presentation ownership
+
+CLI Canon owns standard help, usage failures, validation failures, handler-result failures, and unexpected framework failures. A product may present a typed command result through `NodeCliResultPresenter` and map typed domain errors through `DomainErrorAdapter`.
+
+`NodeCliSpecialTerminalSurface` is an explicit opt-out for a product-owned terminal surface. It is not a general hook for restyling standard help. The 0.1.7 `NodeCliTerminalAdapter` remains importable during migration; move result presentation to `NodeCliResultPresenter`, and move only a genuine special-surface implementation to `NodeCliSpecialTerminalSurface`. Its legacy help and usage callbacks are ignored, so the default path retains one Canon-owned renderer.
+
 ## 12. Path Canon direction
 
 Path Canon is a future CLI Canon layer, not part of M0.

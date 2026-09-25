@@ -157,11 +157,52 @@ test("mixed route projection composes summary, full, and JSON help from one boun
   );
 });
 
-test("terminal adapter can render consumer help from Canon-resolved metadata without reparsing argv", async () => {
+test("Canon owns standard help and special terminal surfaces are explicit", async () => {
   const { product, legacyRoutes } = architectureFixture();
-  const terminal = await runNodeCli(product, ["architecture", "example", "--help"], {
+
+  let legacyHelpCalls = 0;
+  const canonical = await runNodeCli(product, ["architecture", "example", "--help"], {
     legacyRoutes,
     terminalAdapter: {
+      help: () => {
+        legacyHelpCalls += 1;
+        return textOutput("legacy help\n");
+      },
+    },
+  });
+  assert.equal(canonical.exitCode, 0);
+  assert.match(canonical.stdout, /Usage: fixture architecture example/);
+  assert.doesNotMatch(canonical.stdout, /legacy help/);
+  assert.equal(legacyHelpCalls, 0);
+
+  const legacyUsage = await runNodeCli(product, ["architecture", "example", "--unknown-option"], {
+    legacyRoutes,
+    terminalAdapter: {
+      usageFailure: () => {
+        legacyHelpCalls += 1;
+        return textOutput("legacy usage\n");
+      },
+    },
+  });
+  assert.equal(legacyUsage.exitCode, 2);
+  assert.match(legacyUsage.stderr, /^error: /);
+  assert.match(legacyUsage.stderr, /Usage: fixture architecture example/);
+  assert.doesNotMatch(legacyUsage.stderr, /legacy usage/);
+  assert.equal(legacyHelpCalls, 0);
+
+  const specialUsage = await runNodeCli(product, ["architecture", "example", "--unknown-option"], {
+    legacyRoutes,
+    specialTerminalSurface: {
+      usageFailure: (failure) => textOutput(`special ${failure.code}\n`),
+    },
+  });
+  assert.equal(specialUsage.exitCode, 0);
+  assert.equal(specialUsage.stdout, "special unknown-option\n");
+  assert.equal(specialUsage.stderr, "");
+
+  const terminal = await runNodeCli(product, ["architecture", "example", "--help"], {
+    legacyRoutes,
+    specialTerminalSurface: {
       help: ({ mode, request, discovery }) => {
         assert.equal(mode, "summary");
         assert.equal(request.kind, "command");
@@ -239,11 +280,18 @@ test("execution exposes the validated typed result before terminal projection", 
   });
 
   const terminal = projectNodeCliExecution(execution, {
-    terminalAdapter: {
+    resultPresenter: {
       success: ({ result }) => textOutput(`${result.rendered}\n`),
     },
   });
   assert.deepEqual(terminal, { exitCode: 0, stdout: "summary example\n", stderr: "" });
+
+  const compatibleTerminal = projectNodeCliExecution(execution, {
+    terminalAdapter: {
+      success: ({ result }) => textOutput(`${result.rendered}\n`),
+    },
+  });
+  assert.deepEqual(compatibleTerminal, terminal);
 
   const domainExecution = await executeNodeCli(product, ["architecture", "example", "--format=json"]);
   const domainTerminal = projectNodeCliExecution(domainExecution, { domainErrorAdapter });

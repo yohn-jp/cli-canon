@@ -112,17 +112,39 @@ export interface ExecuteNodeCliOptions {
   readonly delegatedSources?: readonly NodeDelegatedCommandSource[];
 }
 
-/** A terminal projection is returned as a Canon output outcome, never written by the handler. */
-export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = CommandCatalog> {
+/** Product-owned presentation of the validated command result. */
+export interface NodeCliResultPresenter<Catalog extends CommandCatalog = CommandCatalog> {
   readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
-  /** Render consumer-specific terminal help from Canon-resolved help metadata. */
+}
+
+/** Explicit opt-out for products that own a special terminal surface. */
+export interface NodeCliSpecialTerminalSurface<Catalog extends CommandCatalog = CommandCatalog> {
+  /** Replace standard help only when the product explicitly opts into a special surface. */
   readonly help?: (execution: NodeCliHelp) => CliOutcome;
+  /** Replace standard usage presentation only for an explicit special surface. */
+  readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
+}
+
+/**
+ * @deprecated Use NodeCliResultPresenter for product result presentation and
+ * NodeCliSpecialTerminalSurface only for an explicit special-surface opt-out.
+ * Standard help and usage callbacks on this compatibility type are ignored.
+ */
+export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = CommandCatalog> {
+  /** @deprecated Use NodeCliResultPresenter.success. */
+  readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
+  /** @deprecated Standard help is Canon-owned; use specialTerminalSurface.help only for a special surface. */
+  readonly help?: (execution: NodeCliHelp) => CliOutcome;
+  /** @deprecated Standard usage presentation is Canon-owned; use specialTerminalSurface.usageFailure only for a special surface. */
   readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
 }
 
 export interface ProjectNodeCliExecutionOptions<DomainError = never, Catalog extends CommandCatalog = CommandCatalog> {
   readonly maxOutputBytes?: number;
   readonly domainErrorAdapter?: DomainErrorAdapter<DomainError>;
+  readonly resultPresenter?: NodeCliResultPresenter<Catalog>;
+  readonly specialTerminalSurface?: NodeCliSpecialTerminalSurface<Catalog>;
+  /** @deprecated Use resultPresenter and specialTerminalSurface. */
   readonly terminalAdapter?: NodeCliTerminalAdapter<Catalog>;
 }
 
@@ -484,13 +506,14 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
   if (execution.status === "delegated") return execution.result;
   if (execution.status === "success") {
     const outcome =
+      options.resultPresenter?.success?.(execution) ??
       options.terminalAdapter?.success?.(execution) ??
       jsonOutput(execution.result, outputPolicyOptions(maxOutputBytes));
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
   if (execution.status === "help") {
     const outcome =
-      options.terminalAdapter?.help?.(execution) ??
+      options.specialTerminalSurface?.help?.(execution) ??
       (typeof execution.projection === "string"
         ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
         : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes)));
@@ -499,7 +522,7 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
 
   if (execution.failureKind === "usage") {
     const outcome =
-      options.terminalAdapter?.usageFailure?.(execution.usageFailure) ??
+      options.specialTerminalSurface?.usageFailure?.(execution.usageFailure) ??
       usageFailure(execution.usageFailure, execution.usage, maxOutputBytes);
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }

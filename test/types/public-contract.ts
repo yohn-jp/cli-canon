@@ -15,6 +15,8 @@ import {
 import {
   executeNodeCli,
   projectNodeCliExecution,
+  type NodeCliResultPresenter,
+  type NodeCliSpecialTerminalSurface,
   type NodeCliTerminalAdapter,
   type StructuredUsageErrorCode,
 } from "../../src/node/index.js";
@@ -50,12 +52,26 @@ const mixedProjection = composeCommandProjection(compiled, legacyRoutes);
 const helpMode = parseHelpMode(mixedProjection, ["read", "--help=full"]);
 if (helpMode !== undefined) projectHelp(mixedProjection, helpMode);
 
-const terminalAdapter: NodeCliTerminalAdapter<typeof commands> = {
+const resultPresenter: NodeCliResultPresenter<typeof commands> = {
   success: ({ result }) => textOutput(result.contents),
+};
+const specialTerminalSurface: NodeCliSpecialTerminalSurface<typeof commands> = {
+  help: ({ mode, request, discovery }) => {
+    mode satisfies "summary" | "full" | "json";
+    request.kind satisfies "root" | "route" | "command";
+    discovery.commands[0]?.id satisfies string | undefined;
+    return textOutput("special surface\n");
+  },
   usageFailure: ({ code }) => {
     const classified: StructuredUsageErrorCode = code;
     return textOutput(classified);
   },
+};
+// Keep the 0.1.7 public type importable during migration.
+const terminalAdapter: NodeCliTerminalAdapter<typeof commands> = {
+  success: ({ result }) => textOutput(result.contents),
+  help: () => textOutput("legacy help\n"),
+  usageFailure: () => textOutput("legacy usage\n"),
 };
 const execution = executeNodeCli(compiled, ["read", "document.md"], { legacyRoutes });
 void execution.then((result) => {
@@ -66,6 +82,7 @@ void execution.then((result) => {
     void contents;
     void invalid;
   }
+  projectNodeCliExecution(result, { resultPresenter, specialTerminalSurface });
   projectNodeCliExecution(result, { terminalAdapter });
 });
 
