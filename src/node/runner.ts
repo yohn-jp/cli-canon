@@ -431,6 +431,7 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
     options.legacyRoutes === undefined
       ? projectComposedCommandTree(composeCommandSources([{ kind: "canonical", id: product.name, product }]), {
           name: product.name,
+          ...(product.description === undefined ? {} : { description: product.description }),
           ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
         })
       : composeCommandProjection(product, options.legacyRoutes);
@@ -465,6 +466,7 @@ async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
   const tree = composeCommandSources(sources);
   const resolvedProjection = projectComposedCommandTree(tree, {
     name: product.name,
+    ...(product.description === undefined ? {} : { description: product.description }),
     ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
   });
   const projection =
