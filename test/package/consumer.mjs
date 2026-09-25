@@ -195,6 +195,38 @@ void executeNodeCli(product, ["echo", "typed package"], { legacyRoutes }).then((
 });
 void runNodeCli(product, ["echo", "typed package"], { resultPresenter, specialTerminalSurface });
 void runNodeCli(product, ["echo", "typed package"], { legacyRoutes, terminalAdapter });
+const catalogCommands = defineCommands({
+  "catalog.list": { route: ["list"], summary: "List entries.", input: {}, result: z.object({ entries: z.array(z.string()) }) },
+  "catalog.count": { route: ["count"], summary: "Count entries.", input: {}, result: z.object({ total: z.number() }) },
+});
+const catalogProduct = compileProduct({
+  name: "fixture-cli",
+  commands: catalogCommands,
+  handlers: bindHandlers(catalogCommands)({
+    "catalog.list": () => ({ entries: ["a"] }),
+    "catalog.count": () => ({ total: 1 }),
+  }),
+});
+const catalogPresenter: NodeCliResultPresenter<typeof catalogCommands> = {
+  success: (execution) => {
+    if (execution.commandId === "catalog.list") {
+      const entries: readonly string[] = execution.result.entries;
+      // @ts-expect-error Packed Node success correlates commandId with its own result.
+      void execution.result.total;
+      return textOutput(entries.join(","));
+    }
+    execution.commandId satisfies "catalog.count";
+    const total: number = execution.result.total;
+    // @ts-expect-error Packed Node success rejects cross-command result access.
+    void execution.result.entries;
+    return textOutput(String(total));
+  },
+};
+void executeNodeCli(catalogProduct, ["list"]).then((execution) => {
+  if (execution.status === "success" && execution.commandId === "catalog.count") execution.result.total satisfies number;
+  projectNodeCliExecution(execution, { resultPresenter: catalogPresenter });
+});
+void runNodeCli(catalogProduct, ["count"], { resultPresenter: catalogPresenter });
 const invocation = projectInvocation(product, "example.echo", { message: "typed package", format: "full" });
 if (invocation.state !== "ready") throw new Error("packed invocation must be ready");
 invocation.value.argv satisfies readonly string[];
