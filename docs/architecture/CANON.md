@@ -203,14 +203,14 @@ CLI structure has one explicit vocabulary of node kinds: `root`, `group`, and `c
 
 Group IDs are inferred from the `defineGroups` declaration keys, as command IDs are from `defineCommands`. Groups are first-class declarations rather than projection-time inference from shared route prefixes. Command grammar is still authored once in `CommandDefinition`; tree nodes reference command declarations and never copy them into a second command model. No projection-specific tree becomes an authority.
 
-Authority boundary: the consumer product owns product/domain content, including group and command IDs, route tokens, summaries, descriptions, and examples. CLI Canon owns the standard CLI structure vocabulary, the runtime, and presentation derived from it. Group metadata is generic presentation content, not product logic.
+Authority boundary: the consumer product owns product/domain content, including the product description plus group and command IDs, route tokens, summaries, descriptions, and examples. CLI Canon owns the standard CLI structure vocabulary, the runtime, and presentation derived from it. Product and group metadata are generic presentation content, not product logic.
 
 ### 6.2 Canonical help document
 
 Help has one semantic authority: the help document projected by `projectHelpDocument` from the resolved command tree and compiled command fields. Text help and JSON help consume this document; neither rebuilds route structure nor carries independent route or flag authority. Canonical-only products use their compiled tree; products with delegated sources use the result of `composeCommandSources` through `projectComposedCommandTree`. The projection reads the resolved tree and never executes a source.
 
 - A help target is explicit: `root`, a declared `group`, or a `command`. An undeclared shared route prefix is not a target and has no inferred summary; commands under it are listed from their nearest declared ancestor with their remaining route segments.
-- The document carries the resolved target, derived usage tokens, target summary/description, arguments, options, children, examples, and the command leaves of the target subtree.
+- The document carries the resolved target, derived usage tokens, target summary/description, arguments, options, children, examples, and the command leaves of the target subtree. The optional product description is the root target summary and therefore appears in standard root help while remaining consumer-authored content.
 - Usage is derived from the route and declared field grammar; it is never a maintained string.
 - Group content comes from the group declaration, never from a descendant command.
 - `summary` (`--help`) contains usage, target summary, and child summaries. `full` (`--help=full`) adds target description, arguments, options, child descriptions, and examples. `json` (`--help=json`) is the discovery projection of the same document's command leaves.
