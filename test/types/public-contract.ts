@@ -40,11 +40,13 @@ const handlers = bindHandlers(commands)({
 });
 const compiled = compileProduct({
   name: "fixture",
+  description: "Canonical fixture CLI.",
   packageMetadata,
   commands,
   handlers,
   schemaProjectionCompleteness: "complete",
 });
+compiled.description satisfies string | undefined;
 projectProductSchemas(compiled, "complete");
 
 const legacyRoutes = [{ id: "legacy.help", route: ["legacy"], summary: "A legacy route.", fields: [] }] as const;
