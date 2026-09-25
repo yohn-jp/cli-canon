@@ -15,7 +15,8 @@ import { executeNodeCli, runNodeCli } from "@yohn-jp/cli-canon/node";
 
 // Generic structural case: one declared group has Canon and delegated children.
 // These expectations are authored here and do not call a renderer or projector.
-const rootHelp = "Usage: atelier <command>\n\nManage the asset workspace.\n\nCommands:\n  assets\tManage assets.\n\nHelp: --help[=full|json]\n";
+const rootHelp =
+  "Usage: atelier <command>\n\nManage the asset workspace.\n\nCommands:\n  assets\tManage assets.\n\nHelp: --help[=full|json]\n";
 const groupHelp =
   "Usage: atelier assets <command>\n\nManage assets.\n\nCommands:\n  inspect\tInspect an asset.\n  sync\tSync an asset.\n\nHelp: --help[=full|json]\n";
 const commandHelp = "Usage: atelier assets inspect <name>\n\nInspect an asset.\n\nHelp: --help[=full|json]\n";
@@ -87,10 +88,7 @@ export async function certifyComposition() {
     name: "atelier",
     description: product.description,
   });
-  assert.equal(
-    projectHelpDocument(projection, { kind: "root" })?.summary,
-    "Manage the asset workspace.",
-  );
+  assert.equal(projectHelpDocument(projection, { kind: "root" })?.summary, "Manage the asset workspace.");
   assert.deepEqual(
     projectHelpDocument(projection, { kind: "group", id: "assets", route: ["assets"] })?.children.map(({ id }) => id),
     ["assets.inspect", "assets.sync"],
