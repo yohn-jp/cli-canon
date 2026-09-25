@@ -1,7 +1,7 @@
 import type { CompiledField } from "../command/compiler.js";
 import type { ProjectionCommandSource, ProjectionProductSource } from "./source.js";
 
-/** Structural read view of the compiled canonical command tree used by the help model. */
+/** Structural read view of the resolved canonical or composed command tree used by the help model. */
 export interface HelpTreeSource {
   readonly children: readonly HelpTreeChild[];
 }
@@ -21,9 +21,9 @@ export type HelpTreeChild =
     };
 
 /**
- * Product input of the canonical help model. `tree` is the compiled canonical
- * command tree; commands absent from it (bounded legacy descriptors) attach to
- * the declared group owning their longest proper route prefix, or to the root.
+ * Product input of the canonical help model. The tree determines route and
+ * group membership. Commands absent from it are supported only by the
+ * deprecated `composeCommandProjection` compatibility path.
  */
 export interface HelpModelProduct extends ProjectionProductSource {
   readonly tree?: HelpTreeSource;

@@ -100,6 +100,10 @@ export type NodeDelegatedCommandSource = ExecutableDelegatedCommandSource<string
 
 export interface ExecuteNodeCliOptions {
   readonly helpFormat?: HelpOutputMode | "text";
+  /**
+   * @deprecated Declare these routes in a delegated command source and pass it
+   * through `delegatedSources`; help and discovery then use the resolved tree.
+   */
   readonly legacyRoutes?: readonly LegacyRouteDescriptor[];
   /**
    * Delegated sources composed with the product's canonical source before execution.
@@ -401,7 +405,13 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
   options: ExecuteNodeCliOptions = {},
 ): Promise<NodeCliExecution<Catalog>> {
   if (options.delegatedSources !== undefined) return executeComposedNodeCli(product, argv, options);
-  const projection = composeCommandProjection(product, options.legacyRoutes ?? []);
+  const projection =
+    options.legacyRoutes === undefined
+      ? projectComposedCommandTree(composeCommandSources([{ kind: "canonical", id: product.name, product }]), {
+          name: product.name,
+          ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
+        })
+      : composeCommandProjection(product, options.legacyRoutes);
   const outcome = await executeCanonicalArgv(product, {
     argv,
     backend: commanderBackend(product),
@@ -431,13 +441,14 @@ async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
 ): Promise<NodeCliExecution<Catalog>> {
   const sources = [{ kind: "canonical", id: product.name, product }, ...(options.delegatedSources ?? [])] as const;
   const tree = composeCommandSources(sources);
-  const projection = composeCommandProjection(
-    projectComposedCommandTree(tree, {
-      name: product.name,
-      ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
-    }),
-    options.legacyRoutes ?? [],
-  );
+  const resolvedProjection = projectComposedCommandTree(tree, {
+    name: product.name,
+    ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
+  });
+  const projection =
+    options.legacyRoutes === undefined
+      ? resolvedProjection
+      : composeCommandProjection(resolvedProjection, options.legacyRoutes);
   const outcome = await executeComposedArgv(
     { tree, sources },
     {

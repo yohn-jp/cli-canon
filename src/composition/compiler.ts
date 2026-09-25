@@ -3,7 +3,7 @@ import { CanonConstructionError, type CanonConstructionIssue } from "../command/
 import type { CommandVisibility } from "../command/model.js";
 import type { CommandTreeChildNode } from "../command/tree.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
-import type { ComposedCommandProjection } from "../projection/discovery.js";
+import type { ResolvedCommandProjection } from "../projection/discovery.js";
 import type { HelpTreeChild } from "../projection/help-model.js";
 import type {
   CommandSource,
@@ -494,7 +494,7 @@ function composedCommands(nodes: readonly ComposedChildNode[]): readonly Compose
 export function projectComposedCommandTree(
   tree: ComposedCommandTree,
   identity: ComposedProjectionIdentity,
-): ComposedCommandProjection {
+): ResolvedCommandProjection {
   return Object.freeze({
     name: identity.name,
     ...(identity.packageMetadata === undefined ? {} : { packageMetadata: identity.packageMetadata }),

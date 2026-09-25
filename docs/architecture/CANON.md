@@ -207,14 +207,14 @@ Authority boundary: the consumer product owns product/domain content, including 
 
 ### 6.2 Canonical help document
 
-Help has one semantic authority: the help document projected by `projectHelpDocument` from the canonical tree and compiled command fields. Text help and JSON help consume this document; neither rebuilds route structure nor carries independent route or flag authority.
+Help has one semantic authority: the help document projected by `projectHelpDocument` from the resolved command tree and compiled command fields. Text help and JSON help consume this document; neither rebuilds route structure nor carries independent route or flag authority. Canonical-only products use their compiled tree; products with delegated sources use the result of `composeCommandSources` through `projectComposedCommandTree`. The projection reads the resolved tree and never executes a source.
 
 - A help target is explicit: `root`, a declared `group`, or a `command`. An undeclared shared route prefix is not a target and has no inferred summary; commands under it are listed from their nearest declared ancestor with their remaining route segments.
 - The document carries the resolved target, derived usage tokens, target summary/description, arguments, options, children, examples, and the command leaves of the target subtree.
 - Usage is derived from the route and declared field grammar; it is never a maintained string.
 - Group content comes from the group declaration, never from a descendant command.
 - `summary` (`--help`) contains usage, target summary, and child summaries. `full` (`--help=full`) adds target description, arguments, options, child descriptions, and examples. `json` (`--help=json`) is the discovery projection of the same document's command leaves.
-- Bounded legacy route descriptors attach under the declared group owning their longest proper route prefix, or under the root; a legacy route cannot claim a declared group route.
+- `LegacyRouteDescriptor`, `composeCommandProjection`, and the Node `legacyRoutes` option are deprecated compatibility APIs for 0.1.7 consumers. Migrate each route to a `DelegatedCommandSource`, compose it with the canonical source using `composeCommandSources`, and pass the executable source through Node's `delegatedSources`. Use `projectComposedCommandTree` when projecting help directly. This keeps route ownership, group membership, help, and discovery on the resolved tree without consumer-side route extraction or help splicing.
 
 ## 7. Input Canon
 
