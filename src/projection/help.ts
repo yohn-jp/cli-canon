@@ -2,11 +2,12 @@ import type { CompiledField } from "../command/compiler.js";
 import { projectCommandDiscovery, type ProductDiscovery } from "./discovery.js";
 import { renderHelpDocument } from "../presentation/help.js";
 import {
-  helpTargetRoutes,
+  helpTargetScopes,
   projectHelpDocument,
   resolveHelpTarget,
   type HelpModelProduct,
   type HelpTarget,
+  type HelpTargetScope,
 } from "./help-model.js";
 
 export {
@@ -38,38 +39,62 @@ export interface ParsedHelpMode {
   readonly invalidMode?: string;
 }
 
-function declaredOptions(product: HelpProjectionProduct): ReadonlyMap<string, CompiledField> {
-  const options = new Map<string, CompiledField>();
-  for (const command of product.commands) {
-    for (const field of command.fields) {
-      if ((field.kind === "option" || field.kind === "flag") && field.flag !== undefined) {
-        options.set(field.flag, field);
-        for (const alias of field.aliases ?? []) options.set(alias, field);
-      }
-    }
-  }
-  return options;
+/** Option grammar by spelling; `null` marks a spelling whose declarations disagree on arity. */
+type OptionTable = ReadonlyMap<string, CompiledField | null>;
+
+function sameArity(left: CompiledField, right: CompiledField): boolean {
+  return left.kind === right.kind && (left.kind !== "option" || left.valueArity === right.valueArity);
 }
 
-function resolveHelpRequest(product: HelpProjectionProduct, words: readonly string[], mode: HelpMode): HelpRequest {
-  const routes = [...helpTargetRoutes(product)].sort(
-    (left, right) =>
-      right.length - left.length || (left.join(" ") < right.join(" ") ? -1 : left.join(" ") > right.join(" ") ? 1 : 0),
-  );
+function optionTable(fields: Iterable<CompiledField>): OptionTable {
+  const table = new Map<string, CompiledField | null>();
+  for (const field of fields) {
+    if ((field.kind !== "option" && field.kind !== "flag") || field.flag === undefined) continue;
+    for (const spelling of [field.flag, ...(field.aliases ?? [])]) {
+      const existing = table.get(spelling);
+      table.set(spelling, existing === undefined || (existing !== null && sameArity(existing, field)) ? field : null);
+    }
+  }
+  return table;
+}
+
+/** Group and command help targets, longest route first, then in route order. */
+function sortedHelpScopes(product: HelpProjectionProduct): readonly HelpTargetScope[] {
+  return [...helpTargetScopes(product)].sort((left, right) => {
+    const leftRoute = left.target.route.join(" ");
+    const rightRoute = right.target.route.join(" ");
+    return (
+      right.target.route.length - left.target.route.length ||
+      (leftRoute < rightRoute ? -1 : leftRoute > rightRoute ? 1 : 0)
+    );
+  });
+}
+
+/** The longest group or command route at the earliest route word; undefined is the root. */
+function resolveHelpScope(scopes: readonly HelpTargetScope[], words: readonly string[]): HelpTargetScope | undefined {
   for (let start = 0; start < words.length; start += 1) {
-    for (const route of routes) {
-      if (route.every((segment, offset) => words[start + offset] === segment)) {
-        const target = resolveHelpTarget(product, route);
-        return target?.kind === "command"
-          ? { kind: "command", commandId: target.id, mode }
-          : { kind: "route", route, mode };
-      }
+    for (const scope of scopes) {
+      if (scope.target.route.every((segment, offset) => words[start + offset] === segment)) return scope;
     }
   }
-  return { kind: "root", mode };
+  return undefined;
 }
 
-/** Parses --help modes and resolves their route from canonical and legacy descriptors. */
+function helpRequest(scope: HelpTargetScope | undefined, mode: HelpMode): HelpRequest {
+  if (scope === undefined) return { kind: "root", mode };
+  return scope.target.kind === "command"
+    ? { kind: "command", commandId: scope.target.id, mode }
+    : { kind: "route", route: scope.target.route, mode };
+}
+
+/**
+ * Parses --help modes and resolves their target from the resolved command tree.
+ *
+ * Option values are classified by the grammar of the route scope reached so far: before
+ * a command route resolves, only `anywhere` options apply; after it, only the resolved
+ * command's declared fields. Declarations of other commands never change a route's help
+ * intent. Tokens after the first `--` are never help tokens.
+ */
 export function parseHelpMode(
   product: HelpProjectionProduct,
   argv: readonly string[],
@@ -77,7 +102,12 @@ export function parseHelpMode(
 ): ParsedHelpMode | undefined {
   const delimiter = argv.indexOf("--");
   const end = delimiter === -1 ? argv.length : delimiter;
-  const options = declaredOptions(product);
+  const scopes = sortedHelpScopes(product);
+  const preRouteOptions = optionTable(
+    product.commands.flatMap((command) => command.fields.filter((field) => field.placement === "anywhere")),
+  );
+  let options = preRouteOptions;
+  let scope: HelpTargetScope | undefined;
   const routeWords: string[] = [];
   let detected: { readonly mode: HelpOutputMode; readonly invalidMode?: string } | undefined;
 
@@ -111,6 +141,11 @@ export function parseHelpMode(
     }
     if (token.startsWith("-")) continue;
     routeWords.push(token);
+    const next = resolveHelpScope(scopes, routeWords);
+    if (next !== scope) {
+      scope = next;
+      options = scope?.target.kind === "command" ? optionTable(scope.fields) : preRouteOptions;
+    }
   }
 
   if (detected === undefined) return undefined;
@@ -122,7 +157,7 @@ export function parseHelpMode(
           ? "summary"
           : defaultMode
       : detected.mode;
-  const request = resolveHelpRequest(product, routeWords, mode === "full" ? "full" : "text");
+  const request = helpRequest(scope, mode === "full" ? "full" : "text");
   return {
     mode,
     request,

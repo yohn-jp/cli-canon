@@ -484,6 +484,34 @@ assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed"]), {
   usage: ["fixture-cli", "packed", "<command>"],
 });
 assert.equal((await node.executeNodeCli(runtimeProduct, ["packed", "echo", "x"])).failureKind, "validation");
+for (const valueName of ["alpha", "zulu"]) {
+  const scopedCalls = [];
+  const scopedCommands = api.defineCommands({
+    [valueName]: {
+      route: [valueName],
+      summary: "Value.",
+      input: { foo: api.option("--foo", z.string()) },
+      result: z.object({ foo: z.string().optional() }),
+    },
+    beta: { route: ["beta"], summary: "Beta.", input: { foo: api.flag("--foo") }, result: z.object({}) },
+  });
+  const scopedProduct = api.compileProduct({
+    name: "fixture-cli",
+    commands: scopedCommands,
+    handlers: api.bindHandlers(scopedCommands)({
+      [valueName]: ({ foo }) => (scopedCalls.push([valueName, foo]), { foo }),
+      beta: () => (scopedCalls.push(["beta"]), {}),
+    }),
+  });
+  const betaHelp = await node.executeNodeCli(scopedProduct, ["beta", "--foo", "--help"]);
+  assert.equal(betaHelp.status, "help", valueName);
+  assert.deepEqual(betaHelp.request, { kind: "command", commandId: "beta", mode: "text" });
+  assert.deepEqual(scopedCalls, [], "packed help executes no handler");
+  assert.equal(api.parseHelpMode(scopedProduct, [valueName, "--foo", "--help"]), undefined, valueName);
+  assert.equal((await node.executeNodeCli(scopedProduct, [valueName, "--foo", "--help"])).status, "success");
+  assert.deepEqual(scopedCalls, [[valueName, "--help"]], "a required option value is never a help token");
+  assert.equal(api.parseHelpMode(scopedProduct, ["beta", "--", "--help"]), undefined);
+}
 const nonFinite = api.jsonOutput({ value: Number.NaN });
 assert.equal(nonFinite.status, "failure");
 assert.equal(nonFinite.failureKind, "serialization");
