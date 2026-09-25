@@ -430,6 +430,7 @@ assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed"]), {
   status: "failure",
   failureKind: "usage",
   usageFailure: { code: "no-command" },
+  usage: ["fixture-cli", "packed", "<command>"],
 });
 assert.equal((await node.executeNodeCli(runtimeProduct, ["packed", "echo", "x"])).failureKind, "validation");
 const nonFinite = api.jsonOutput({ value: Number.NaN });

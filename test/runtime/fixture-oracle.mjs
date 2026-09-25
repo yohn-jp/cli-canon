@@ -16,6 +16,19 @@ export const certificationOracle = {
     includesDescription: true,
     includesExample: true,
   },
+  defaultHelp: {
+    exitCode: 0,
+    stdout:
+      "Usage: fixture-cli echo <message> [<suffix>] [--format[=<format>]]\n\n" +
+      "Echo a message.\n\nHelp: --help[=full|json]\n",
+    stderr: "",
+  },
+  usageFailure: {
+    exitCode: 2,
+    stdout: "",
+    stderr: "error: unknown option\n\n" + "Usage: fixture-cli echo <message> [<suffix>] [--format[=<format>]]\n",
+    failureKind: "usage",
+  },
   discovery: {
     name: "fixture-cli",
     commands: [

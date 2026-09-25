@@ -189,6 +189,10 @@ test("leaf command help document derives usage, arguments, options, and examples
 
 test("summary mode omits full-only content while full mode renders it", async () => {
   const product = kit();
+  assert.equal(
+    (await runNodeCli(product, ["--help"])).stdout,
+    "Usage: kit <command>\n\nCommands:\n  document\tWork with documents.\n  math double\tDouble an integer.\n\nHelp: --help[=full|json]\n",
+  );
   const target = { kind: "command", id: "document.render", route: ["document", "render"] };
   const summary = projectHelpDocument(product, target, "summary");
   assert.equal(summary.description, undefined);
@@ -240,6 +244,45 @@ test("JSON help is the discovery projection of the same help document", async ()
       },
     ],
   });
+});
+
+test("human and JSON help preserve Unicode, final newlines, and complete output budgets", async () => {
+  const commands = defineCommands({
+    snow: {
+      route: ["snow"],
+      summary: "雪を描く。",
+      input: { value: positional(z.string(), { metavar: "値" }) },
+      result: z.object({}),
+    },
+  });
+  const product = compileProduct({ name: "cli", commands, handlers: bindHandlers(commands)({ snow: () => ({}) }) });
+  const expectedHelp = "Usage: cli <command>\n\nCommands:\n  snow\t雪を描く。\n\nHelp: --help[=full|json]\n";
+  const helpBytes = Buffer.byteLength(expectedHelp, "utf8");
+  const help = await runNodeCli(product, ["--help"], { maxOutputBytes: helpBytes });
+  assert.deepEqual(help, { exitCode: 0, stdout: expectedHelp, stderr: "" });
+  assert.equal(help.stdout.endsWith("\n"), true);
+  assert.equal(Buffer.byteLength(help.stdout, "utf8"), helpBytes);
+
+  const boundedHelp = await runNodeCli(product, ["--help"], { maxOutputBytes: helpBytes - 1 });
+  assert.equal(boundedHelp.exitCode, 1);
+  assert.equal(boundedHelp.failureKind, "budget");
+  assert.equal(boundedHelp.stdout, "");
+  assert.ok(Buffer.byteLength(boundedHelp.stderr, "utf8") <= helpBytes - 1);
+
+  const json = await runNodeCli(product, ["--help=json"]);
+  assert.equal(json.exitCode, 0);
+  assert.equal(json.stdout.endsWith("\n"), true);
+  assert.doesNotMatch(json.stdout, /^Usage:/u);
+  const jsonBytes = Buffer.byteLength(json.stdout, "utf8");
+  const boundedJson = await runNodeCli(product, ["--help=json"], { maxOutputBytes: jsonBytes });
+  assert.deepEqual(boundedJson, json);
+  assert.doesNotThrow(() => JSON.parse(boundedJson.stdout));
+
+  const truncatedJson = await runNodeCli(product, ["--help=json"], { maxOutputBytes: jsonBytes - 1 });
+  assert.equal(truncatedJson.exitCode, 1);
+  assert.equal(truncatedJson.failureKind, "budget");
+  assert.equal(truncatedJson.stdout, "");
+  assert.ok(Buffer.byteLength(truncatedJson.stderr, "utf8") <= jsonBytes - 1);
 });
 
 test("legacy descriptors attach under the declared group owning their route prefix", async () => {
