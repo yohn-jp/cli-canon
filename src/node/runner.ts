@@ -12,8 +12,14 @@ import type { DomainErrorAdapter } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
 import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
-import { executeCanonicalArgv } from "../runtime/execution.js";
-import type { CanonicalArgvBackend, CanonicalArgvParse, CanonicalExecutionOutcome } from "../runtime/model.js";
+import { composeCommandSources, projectComposedCommandTree } from "../composition/compiler.js";
+import { executeCanonicalArgv, executeComposedArgv } from "../runtime/execution.js";
+import type {
+  CanonicalArgvBackend,
+  CanonicalArgvParse,
+  CanonicalExecutionOutcome,
+  ExecutableDelegatedCommandSource,
+} from "../runtime/model.js";
 
 export type { CliFailureKind, CliResult } from "../output/model.js";
 
@@ -66,12 +72,28 @@ export type NodeCliFailure =
       readonly error: unknown;
     };
 
+/** A route resolved to a delegated owner; the delegated executor owns its terminal result. */
+export interface NodeCliDelegated {
+  readonly status: "delegated";
+  readonly sourceId: string;
+  readonly commandId: string;
+  readonly result: CliResult;
+}
+
 export type NodeCliExecution<Catalog extends CommandCatalog = CommandCatalog> =
-  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliFailure;
+  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliFailure | NodeCliDelegated;
+
+/** A delegated command source whose one executor boundary returns its own terminal result. */
+export type NodeDelegatedCommandSource = ExecutableDelegatedCommandSource<string, CliResult>;
 
 export interface ExecuteNodeCliOptions {
   readonly helpFormat?: HelpOutputMode | "text";
   readonly legacyRoutes?: readonly LegacyRouteDescriptor[];
+  /**
+   * Delegated sources composed with the product's canonical source before execution.
+   * Each argv resolves to exactly one owner; no failure dispatches to another source.
+   */
+  readonly delegatedSources?: readonly NodeDelegatedCommandSource[];
 }
 
 /** A terminal projection is returned as a Canon output outcome, never written by the handler. */
@@ -353,6 +375,7 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
   argv: readonly string[],
   options: ExecuteNodeCliOptions = {},
 ): Promise<NodeCliExecution<Catalog>> {
+  if (options.delegatedSources !== undefined) return executeComposedNodeCli(product, argv, options);
   const projection = composeCommandProjection(product, options.legacyRoutes ?? []);
   const outcome = await executeCanonicalArgv(product, {
     argv,
@@ -367,11 +390,52 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
   return nodeCliExecution(outcome);
 }
 
+/**
+ * Composes the product's canonical source with delegated sources, resolves the owner
+ * from the composed tree, and invokes exactly that owner's executor.
+ */
+async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+  argv: readonly string[],
+  options: ExecuteNodeCliOptions,
+): Promise<NodeCliExecution<Catalog>> {
+  const sources = [{ kind: "canonical", id: product.name, product }, ...(options.delegatedSources ?? [])] as const;
+  const tree = composeCommandSources(sources);
+  const projection = composeCommandProjection(
+    projectComposedCommandTree(tree, {
+      name: product.name,
+      ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
+    }),
+    options.legacyRoutes ?? [],
+  );
+  const outcome = await executeComposedArgv(
+    { tree, sources },
+    {
+      argv,
+      backend: commanderBackend(product),
+      help: projection,
+      ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
+    },
+  );
+  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  if (outcome.status === "delegated") {
+    return { status: "delegated", sourceId: outcome.sourceId, commandId: outcome.commandId, result: outcome.result };
+  }
+  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
+    return { status: "failure", failureKind: "usage", usageFailure: outcome.grammarFailure };
+  }
+  if (outcome.status === "failure" && outcome.failureKind === "delegated-error") {
+    return { status: "failure", failureKind: "handler-error", error: outcome.error };
+  }
+  return nodeCliExecution(outcome as CanonicalExecutionOutcome<Catalog>);
+}
+
 export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(
   execution: NodeCliExecution<Catalog>,
   options: ProjectNodeCliExecutionOptions<DomainError, Catalog> = {},
 ): CliResult {
   const maxOutputBytes = options.maxOutputBytes;
+  if (execution.status === "delegated") return execution.result;
   if (execution.status === "success") {
     const outcome =
       options.terminalAdapter?.success?.(execution) ??

@@ -2,12 +2,16 @@ import type { CompiledField, CompiledProduct } from "../command/compiler.js";
 import { CanonConstructionError, type CanonConstructionIssue } from "../command/errors.js";
 import type { CommandVisibility } from "../command/model.js";
 import type { CommandTreeChildNode } from "../command/tree.js";
+import type { ProductPackageIdentity } from "../product/identity.js";
+import type { ComposedCommandProjection } from "../projection/discovery.js";
+import type { HelpTreeChild } from "../projection/help-model.js";
 import type {
   CommandSource,
   CommandSourceId,
   CommandSourceKind,
   CommandSourceOwner,
   ComposedChildNode,
+  ComposedCommandNode,
   ComposedCommandTree,
 } from "./model.js";
 
@@ -454,4 +458,47 @@ export function composeCommandSources<const Sources extends readonly CommandSour
     root: Object.freeze({ kind: "root" as const, children: build(undefined) }),
   });
   return tree as ComposedCommandTree<CommandSourceId<Sources>>;
+}
+
+/** Product identity carried by the structural projection of a composed tree. */
+export interface ComposedProjectionIdentity {
+  readonly name: string;
+  readonly packageMetadata?: ProductPackageIdentity;
+}
+
+function helpTreeChildren(nodes: readonly ComposedChildNode[]): readonly HelpTreeChild[] {
+  return nodes.map((node): HelpTreeChild => {
+    if (node.kind === "command") return { kind: "command", id: node.id };
+    return {
+      kind: "group",
+      id: node.id,
+      route: node.route,
+      definition: {
+        summary: node.summary,
+        ...(node.description === undefined ? {} : { description: node.description }),
+        ...(node.examples === undefined ? {} : { examples: node.examples }),
+      },
+      children: helpTreeChildren(node.children),
+    };
+  });
+}
+
+function composedCommands(nodes: readonly ComposedChildNode[]): readonly ComposedCommandNode[] {
+  return nodes.flatMap((node) => (node.kind === "command" ? [node] : composedCommands(node.children)));
+}
+
+/**
+ * Projects a composed tree to the structural help/discovery product surface.
+ * Every source contributes only its declared structure; no source is executed.
+ */
+export function projectComposedCommandTree(
+  tree: ComposedCommandTree,
+  identity: ComposedProjectionIdentity,
+): ComposedCommandProjection {
+  return Object.freeze({
+    name: identity.name,
+    ...(identity.packageMetadata === undefined ? {} : { packageMetadata: identity.packageMetadata }),
+    tree: Object.freeze({ children: helpTreeChildren(tree.root.children) }),
+    commands: Object.freeze(composedCommands(tree.root.children)),
+  });
 }
