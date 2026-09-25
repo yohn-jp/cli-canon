@@ -71,7 +71,7 @@ try {
     ),
   );
 
-  for (const filename of ["fixture-scenario.mjs", "fixture-oracle.mjs"]) {
+  for (const filename of ["fixture-scenario.mjs", "fixture-oracle.mjs", "composition-certification.mjs"]) {
     copyFileSync(path.join(testDirectory, "..", "runtime", filename), path.join(consumer, filename));
   }
   for (const filename of ["failure.test.mjs", "passing.test.mjs"]) {
@@ -335,9 +335,11 @@ import * as node from "@yohn-jp/cli-canon/node";
 import packageMetadata from "./package.json" with { type: "json" };
 import { certifyScenarios, projectNodeTestTap } from "@yohn-jp/cli-canon/testing";
 import { createCertificationScenario } from "./fixture-scenario.mjs";
+import { certifyComposition } from "./composition-certification.mjs";
 
 assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
 assert.equal("projectNodeTestTap" in api, false, "testing helpers must stay outside the runtime root entrypoint");
+await certifyComposition();
 await certifyScenarios(
   [createCertificationScenario(packageMetadata, ["packed"])],
   [{ id: "packed", context: { api, node } }],
