@@ -89,10 +89,7 @@ export async function certifyComposition() {
     name: "atelier",
     description: product.description,
   });
-  assert.equal(
-    projectHelpDocument(projection, { kind: "root" })?.summary,
-    "Manage the asset workspace.",
-  );
+  assert.equal(projectHelpDocument(projection, { kind: "root" })?.summary, "Manage the asset workspace.");
   assert.deepEqual(
     projectHelpDocument(projection, { kind: "group", id: "assets", route: ["assets"] })?.children.map(({ id }) => id),
     ["assets.inspect", "assets.sync"],
