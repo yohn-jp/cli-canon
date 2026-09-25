@@ -499,7 +499,6 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
     backend: commanderBackend(product),
     help: projection,
     ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
-    ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
   });
   if (outcome.status === "help" || outcome.status === "version") return nodeCliShellExecution(outcome, projection);
   if (outcome.status === "failure" && outcome.failureKind === "grammar") {
@@ -535,7 +534,6 @@ async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
       backend: commanderBackend(product),
       help: projection,
       ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
-      ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
     },
   );
   const { presentation } = outcome;
