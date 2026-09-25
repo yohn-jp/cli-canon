@@ -28,6 +28,8 @@ export interface CanonicalCommandRequest {
 export interface CanonicalRuntimeProduct<Catalog extends CommandCatalog = CommandCatalog> {
   readonly tree: CommandTreeRootNode<any, Catalog>;
   readonly handlers: HandlerMap<Catalog>;
+  /** Canonical package identity used by the standard-shell version request. */
+  readonly packageMetadata?: ProductPackageIdentity;
 }
 
 /** Runtime-owned request classifications. Parser/backend diagnostics are never part of this contract. */
@@ -129,12 +131,6 @@ export interface CanonicalArgvRequest<Failure, RootState = unknown> {
   /** Help surface against which the runtime resolves help intent before any grammar parsing. */
   readonly help: HelpProjectionProduct;
   readonly helpFormat?: HelpOutputMode | "text";
-  /**
-   * The single version authority, `CompiledProduct.packageMetadata`. When absent,
-   * `--version` is not a shell request and reaches the grammar backend as ordinary argv.
-   */
-  readonly packageMetadata?: ProductPackageIdentity;
-}
 
 /** Attaches the invocation's Canon-resolved presentation mode to each outcome member. */
 type WithPresentation<Outcome> = Outcome extends unknown
