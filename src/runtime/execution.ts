@@ -296,6 +296,7 @@ export async function executeCanonicalArgv<const Catalog extends CommandCatalog,
   const resolution = resolveArgvRequest<CommandTreeCommandNode, Failure, RootState>(
     (product.tree as unknown as CommandTreeRootNode).children,
     request,
+    product.packageMetadata,
   );
   if (resolution.kind !== "command") return resolution.outcome;
   return executeResolvedArgv(product, resolution.node, resolution, request);
@@ -340,6 +341,7 @@ function withPresentation<Outcome extends object>(
 function resolveArgvRequest<Node extends ArgvTreeNode & { readonly kind: "command" }, Failure, RootState>(
   children: readonly ArgvTreeNode[],
   request: CanonicalArgvRequest<Failure, RootState>,
+  packageMetadata: ProductPackageIdentity | undefined,
 ): ArgvRequestResolution<Node, Failure, RootState> {
   let presentation: PresentationMode = "human";
   let resolution: ArgvRouteResolution<Node, Failure, RootState>;
@@ -359,7 +361,6 @@ function resolveArgvRequest<Node extends ArgvTreeNode & { readonly kind: "comman
         },
       };
     }
-    const { packageMetadata } = request;
     if (packageMetadata !== undefined && shell.argv.length === 1 && shell.argv[0] === "--version") {
       return { kind: "outcome", outcome: { status: "version", packageMetadata, presentation } };
     }
@@ -449,9 +450,16 @@ export async function executeComposedArgv<
   product: ComposedRuntimeProduct<SourceId, Result>,
   request: CanonicalArgvRequest<Failure, RootState>,
 ): Promise<ComposedArgvOutcome<Failure, Result, SourceId>> {
+  const canonicalSources = product.sources.filter(
+    (source): source is Extract<(typeof product.sources)[number], { readonly kind: "canonical" }> =>
+      source.kind === "canonical",
+  );
+  const packageMetadata =
+    canonicalSources.length === 1 ? canonicalSources[0]?.product.packageMetadata : undefined;
   const resolution = resolveArgvRequest<ComposedCommandNode<SourceId>, Failure, RootState>(
     product.tree.root.children,
     request,
+    packageMetadata,
   );
   if (resolution.kind !== "command") return resolution.outcome;
 
