@@ -134,10 +134,10 @@ void executeCanonicalArgv(product, { argv: ["--version"], backend, help: product
 );
 
 // Version identity belongs to the compiled product, not the argv request.
-// @ts-expect-error CanonicalArgvRequest cannot override package identity.
 void executeCanonicalArgv(product, {
   argv: ["--version"],
   backend,
   help: product,
+  // @ts-expect-error CanonicalArgvRequest cannot override package identity.
   packageMetadata: { name: "@example/override", version: "9.9.9" },
 });
