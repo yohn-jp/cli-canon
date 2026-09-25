@@ -18,8 +18,9 @@ import {
   type ParsedHelpMode,
 } from "../projection/help.js";
 import { renderUsageFailure } from "../presentation/index.js";
-import type { DomainErrorAdapter } from "../output/model.js";
+import type { DomainErrorAdapter, PresentationMode } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
+import type { ProductPackageIdentity } from "../product/identity.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
 import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
 import { composeCommandSources, projectComposedCommandTree } from "../composition/compiler.js";
@@ -31,7 +32,7 @@ import type {
   ExecutableDelegatedCommandSource,
 } from "../runtime/model.js";
 
-export type { CliFailureKind, CliResult } from "../output/model.js";
+export type { CliFailureKind, CliResult, PresentationMode } from "../output/model.js";
 
 export type StructuredUsageErrorCode =
   | "extra-positional-argument"
@@ -56,17 +57,20 @@ export interface StructuredUsageFailure {
 /**
  * A validated command result correlated with its command identity: narrowing
  * `commandId` narrows `result` to that command's result schema output.
+ * `presentation` is the Canon-resolved presentation mode of the invocation.
  */
 export type NodeCliSuccess<Catalog extends CommandCatalog = CommandCatalog> = {
   readonly [Id in CommandId<Catalog>]: {
     readonly status: "success";
     readonly commandId: Id;
     readonly result: CommandResultOutput<Catalog[Id]>;
+    readonly presentation: PresentationMode;
   };
 }[CommandId<Catalog>];
 
 export interface NodeCliHelp {
   readonly status: "help";
+  readonly presentation: PresentationMode;
   readonly mode: HelpOutputMode;
   /** Canon-resolved help target; consumers never need to parse help argv. */
   readonly request: HelpRequest;
@@ -75,9 +79,17 @@ export interface NodeCliHelp {
   readonly projection: string | ProductDiscovery;
 }
 
+/** A Canon version request projected from `CompiledProduct.packageMetadata`, the single version authority. */
+export interface NodeCliVersion {
+  readonly status: "version";
+  readonly presentation: PresentationMode;
+  readonly packageMetadata: ProductPackageIdentity;
+}
+
 export type NodeCliFailure =
   | {
       readonly status: "failure";
+      readonly presentation: PresentationMode;
       readonly failureKind: "usage";
       readonly usageFailure: StructuredUsageFailure;
       /** Usage tokens projected from the canonical help document for this failure target. */
@@ -85,6 +97,7 @@ export type NodeCliFailure =
     }
   | {
       readonly status: "failure";
+      readonly presentation: PresentationMode;
       /** Only `handler-error` carries product errors eligible for domain-error mapping. */
       readonly failureKind: "validation" | "handler-result" | "handler-error" | "unexpected";
       readonly error: unknown;
@@ -93,13 +106,14 @@ export type NodeCliFailure =
 /** A route resolved to a delegated owner; the delegated executor owns its terminal result. */
 export interface NodeCliDelegated {
   readonly status: "delegated";
+  readonly presentation: PresentationMode;
   readonly sourceId: string;
   readonly commandId: string;
   readonly result: CliResult;
 }
 
 export type NodeCliExecution<Catalog extends CommandCatalog = CommandCatalog> =
-  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliFailure | NodeCliDelegated;
+  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliVersion | NodeCliFailure | NodeCliDelegated;
 
 /** A delegated command source whose one executor boundary returns its own terminal result. */
 export type NodeDelegatedCommandSource = ExecutableDelegatedCommandSource<string, CliResult>;
@@ -123,7 +137,7 @@ export interface NodeCliResultPresenter<Catalog extends CommandCatalog = Command
   readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
 }
 
-/** Explicit opt-out for products that own a special terminal surface. */
+/** Explicit opt-out for products that own a special terminal surface; never applied in machine presentation mode. */
 export interface NodeCliSpecialTerminalSurface<Catalog extends CommandCatalog = CommandCatalog> {
   /** Replace standard help only when the product explicitly opts into a special surface. */
   readonly help?: (execution: NodeCliHelp) => CliOutcome;
@@ -273,9 +287,14 @@ function projectHelpDiscovery(product: DiscoveryProjectionProduct, request: Help
   return projectDiscovery(product, route === undefined ? {} : { route });
 }
 
-function nodeCliHelp(product: DiscoveryProjectionProduct, parsed: ParsedHelpMode): NodeCliHelp {
+function nodeCliHelp(
+  product: DiscoveryProjectionProduct,
+  parsed: ParsedHelpMode,
+  presentation: PresentationMode,
+): NodeCliHelp {
   return {
     status: "help",
+    presentation,
     mode: parsed.mode,
     request: parsed.request,
     discovery: projectHelpDiscovery(product, parsed.request),
@@ -403,9 +422,10 @@ function usageForFailure(
 
 /** Adapts a semantic runtime outcome to the Node execution contract without re-resolving or re-decoding. */
 function nodeCliExecution<const Catalog extends CommandCatalog>(
-  outcome: CanonicalExecutionOutcome<Catalog>,
+  outcome: CanonicalExecutionOutcome<Catalog> & { readonly presentation: PresentationMode },
   product: HelpProjectionProduct,
 ): NodeCliExecution<Catalog> {
+  const { presentation } = outcome;
   if (outcome.status === "success") {
     const { route: _route, ...success } = outcome;
     return success;
@@ -420,12 +440,44 @@ function nodeCliExecution<const Catalog extends CommandCatalog>(
     };
     return {
       status: "failure",
+      presentation,
       failureKind: "usage",
       usageFailure,
       usage: usageForFailure(product, { ...outcome.usageFailure, ...usageFailure }),
     };
   }
-  return { status: "failure", failureKind: outcome.failureKind, error: outcome.error };
+  return { status: "failure", presentation, failureKind: outcome.failureKind, error: outcome.error };
+}
+
+/** Adapts the runtime's shell outcomes; the presentation mode is carried, never re-derived. */
+function nodeCliShellExecution(
+  outcome:
+    | { readonly status: "help"; readonly help: ParsedHelpMode; readonly presentation: PresentationMode }
+    | {
+        readonly status: "version";
+        readonly packageMetadata: ProductPackageIdentity;
+        readonly presentation: PresentationMode;
+      }
+    | {
+        readonly status: "failure";
+        readonly failureKind: "grammar";
+        readonly grammarFailure: StructuredUsageFailure;
+        readonly presentation: PresentationMode;
+      },
+  product: DiscoveryProjectionProduct,
+): NodeCliHelp | NodeCliVersion | NodeCliFailure {
+  const { presentation } = outcome;
+  if (outcome.status === "help") return nodeCliHelp(product, outcome.help, presentation);
+  if (outcome.status === "version") {
+    return { status: "version", presentation, packageMetadata: outcome.packageMetadata };
+  }
+  return {
+    status: "failure",
+    presentation,
+    failureKind: "usage",
+    usageFailure: outcome.grammarFailure,
+    usage: usageForFailure(product, outcome.grammarFailure),
+  };
 }
 
 export async function executeNodeCli<const Catalog extends CommandCatalog>(
@@ -448,14 +500,9 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
     help: projection,
     ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
   });
-  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  if (outcome.status === "help" || outcome.status === "version") return nodeCliShellExecution(outcome, projection);
   if (outcome.status === "failure" && outcome.failureKind === "grammar") {
-    return {
-      status: "failure",
-      failureKind: "usage",
-      usageFailure: outcome.grammarFailure,
-      usage: usageForFailure(projection, outcome.grammarFailure),
-    };
+    return nodeCliShellExecution(outcome, projection);
   }
   return nodeCliExecution(outcome, projection);
 }
@@ -489,22 +536,27 @@ async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
       ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
     },
   );
-  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  const { presentation } = outcome;
+  if (outcome.status === "help" || outcome.status === "version") return nodeCliShellExecution(outcome, projection);
   if (outcome.status === "delegated") {
-    return { status: "delegated", sourceId: outcome.sourceId, commandId: outcome.commandId, result: outcome.result };
-  }
-  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
     return {
-      status: "failure",
-      failureKind: "usage",
-      usageFailure: outcome.grammarFailure,
-      usage: usageForFailure(projection, outcome.grammarFailure),
+      status: "delegated",
+      presentation,
+      sourceId: outcome.sourceId,
+      commandId: outcome.commandId,
+      result: outcome.result,
     };
   }
-  if (outcome.status === "failure" && outcome.failureKind === "delegated-error") {
-    return { status: "failure", failureKind: "handler-error", error: outcome.error };
+  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
+    return nodeCliShellExecution(outcome, projection);
   }
-  return nodeCliExecution(outcome as CanonicalExecutionOutcome<Catalog>, projection);
+  if (outcome.status === "failure" && outcome.failureKind === "delegated-error") {
+    return { status: "failure", presentation, failureKind: "handler-error", error: outcome.error };
+  }
+  return nodeCliExecution(
+    outcome as CanonicalExecutionOutcome<Catalog> & { readonly presentation: PresentationMode },
+    projection,
+  );
 }
 
 export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(
@@ -520,9 +572,18 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
       jsonOutput(execution.result, outputPolicyOptions(maxOutputBytes));
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
+  const special = execution.presentation === "human" ? options.specialTerminalSurface : undefined;
+  if (execution.status === "version") {
+    const { name, version } = execution.packageMetadata;
+    const outcome =
+      execution.presentation === "machine"
+        ? jsonOutput({ name, version }, outputPolicyOptions(maxOutputBytes))
+        : textOutput(`${version}\n`, outputPolicyOptions(maxOutputBytes));
+    return toCliResult(outcome);
+  }
   if (execution.status === "help") {
     const outcome =
-      options.specialTerminalSurface?.help?.(execution) ??
+      special?.help?.(execution) ??
       (typeof execution.projection === "string"
         ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
         : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes)));
@@ -531,7 +592,7 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
 
   if (execution.failureKind === "usage") {
     const outcome =
-      options.specialTerminalSurface?.usageFailure?.(execution.usageFailure) ??
+      special?.usageFailure?.(execution.usageFailure) ??
       usageFailure(execution.usageFailure, execution.usage, maxOutputBytes);
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
@@ -553,7 +614,7 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
 
   const adapter = options.domainErrorAdapter;
   if (adapter?.is(execution.error) === true) {
-    const mapped = adapter.map(execution.error);
+    const mapped = adapter.map(execution.error, execution.presentation);
     return toCliResult(failureResult("domain", mapped.output, mapped.exitCode, maxOutputBytes, mapped.stream));
   }
   return toCliResult(failureResult("unexpected", `UNEXPECTED: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes));

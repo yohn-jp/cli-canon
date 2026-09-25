@@ -101,6 +101,8 @@ export interface CompiledProduct<
 
 const LONG_FLAG = /^--[a-z0-9][a-z0-9-]*$/u;
 const SHORT_FLAG = /^-[A-Za-z0-9]$/u;
+/** Canon standard-shell tokens; a product field may not declare them as a flag or alias. */
+const RESERVED_SHELL_FLAGS: ReadonlySet<string> = new Set(["--help", "-h", "--version", "--json"]);
 
 function fieldFlags(field: InputDefinition[string]): readonly string[] {
   return field.kind === "option" || field.kind === "flag" ? [field.flag, ...field.aliases] : [];
@@ -360,12 +362,12 @@ export function compileProduct<
         } else {
           localFlags.set(candidate, fieldKey);
         }
-        if (candidate === "--help" || candidate === "-h") {
+        if (RESERVED_SHELL_FLAGS.has(candidate)) {
           issues.push({
             code: "FLAG_COLLISION",
             commandId,
             field: fieldKey,
-            message: `${commandId}.${fieldKey}: ${candidate} is reserved for Canon help`,
+            message: `${commandId}.${fieldKey}: ${candidate} is reserved for the Canon standard shell`,
           });
         }
         if (field.kind === "option" && field.optionLookingValuePolicy === "reject") {

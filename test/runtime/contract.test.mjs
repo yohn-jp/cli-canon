@@ -28,14 +28,14 @@ function fixture() {
           required: true,
           metavar: "path",
         }),
-        json: flag("--json", { placement: "anywhere" }),
+        draft: flag("--draft", { placement: "anywhere" }),
         tag: option("--tag", z.string().min(1), { repeatable: true, metavar: "tag" }),
         args: rawArgs(),
       },
       result: z.object({
         file: z.string(),
         writtenFile: z.string(),
-        json: z.boolean(),
+        draft: z.boolean(),
         tags: z.array(z.string()),
         args: z.array(z.string()),
       }),
@@ -48,10 +48,10 @@ function fixture() {
     },
   });
   const handlers = bindHandlers(commands)({
-    "document.render": async ({ file, out, json, tag, args }) => ({
+    "document.render": async ({ file, out, draft, tag, args }) => ({
       file,
       writtenFile: out,
-      json,
+      draft,
       tags: [...tag],
       args: [...args],
     }),
@@ -125,7 +125,7 @@ test("one command canon drives routing, validation, result validation, and outpu
   assert.deepEqual(JSON.parse(result.stdout), {
     file: "input.md",
     writtenFile: "out.html",
-    json: false,
+    draft: false,
     tags: ["a", "b"],
     args: ["--literal", "tail"],
   });
@@ -133,9 +133,9 @@ test("one command canon drives routing, validation, result validation, and outpu
 });
 
 test("declared anywhere flags work before the nested route", async () => {
-  const result = await runNodeCli(fixture(), ["--json", "document", "render", "input.md", "--out=out.html"]);
+  const result = await runNodeCli(fixture(), ["--draft", "document", "render", "input.md", "--out=out.html"]);
   assert.equal(result.exitCode, 0);
-  assert.equal(JSON.parse(result.stdout).json, true);
+  assert.equal(JSON.parse(result.stdout).draft, true);
 });
 
 test("declared anywhere required-value options work before a nested route", async () => {
@@ -191,7 +191,7 @@ test("option-looking tokens are consumed as required option values by the M0 gra
   const result = await runNodeCli(fixture(), ["document", "render", "input.md", "--out", "--json"]);
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).writtenFile, "--json");
-  assert.equal(JSON.parse(result.stdout).json, false);
+  assert.equal(JSON.parse(result.stdout).draft, false);
 
   const helpAsValue = await runNodeCli(fixture(), ["document", "render", "input.md", "--out", "--help"]);
   assert.equal(helpAsValue.exitCode, 0);

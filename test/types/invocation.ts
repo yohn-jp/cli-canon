@@ -21,7 +21,7 @@ const commands = defineCommands({
       target: positional(z.string()),
       out: option("--out", z.string(), { required: true }),
       format: option("--format", z.string(), { valueArity: "optional" }),
-      json: flag("--json"),
+      draft: flag("--draft"),
       tag: option("--tag", z.string(), { repeatable: true }),
       args: rawArgs(),
     },
@@ -34,7 +34,7 @@ const bindings: Bindings = {
   target: "input",
   out: "out.html",
   format: true,
-  json: true,
+  draft: true,
   tag: ["a", "b"],
   args: ["--literal"],
 };
@@ -45,7 +45,7 @@ const unknownBinding: Bindings = { missing: "value" };
 void unknownBinding;
 
 // @ts-expect-error flags require boolean bindings.
-const invalidFlagBinding: Bindings = { json: "yes" };
+const invalidFlagBinding: Bindings = { draft: "yes" };
 void invalidFlagBinding;
 
 // @ts-expect-error required-value options cannot use the valueless marker.
@@ -63,7 +63,7 @@ const skills = defineSkills({
     steps: [
       skillCommand(commands, "deploy.run", {
         guidance: "Run deployment.",
-        bindings: { target: "input", out: "out.html", json: true },
+        bindings: { target: "input", out: "out.html", draft: true },
       }),
     ],
   },

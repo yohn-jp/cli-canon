@@ -104,6 +104,8 @@ import {
   type GroupId,
   type PathId,
   type PathParameterName,
+  type DelegatedCommandRequest,
+  type PresentationMode,
   projectProductSchemas,
   projectInvocation,
   type ProductPackageIdentity,
@@ -117,6 +119,7 @@ import {
   projectNodeCliExecution,
   runNodeCli,
   type NodeCliResultPresenter,
+  type NodeCliVersion,
   type NodeCliSpecialTerminalSurface,
   type NodeCliTerminalAdapter,
   type StructuredUsageErrorCode,
@@ -352,6 +355,42 @@ tapFailure?.actual satisfies unknown;
 tapFailure?.stack satisfies string | undefined;
 tapFailure?.diagnostics satisfies string | undefined;
 void packedTapProjection.failures;
+const shellPresenter: NodeCliResultPresenter<typeof catalogCommands> = {
+  success: (execution) => {
+    execution.presentation satisfies PresentationMode;
+    if (execution.commandId === "catalog.list") {
+      const entries: readonly string[] = execution.result.entries;
+      return execution.presentation === "machine" ? jsonOutput({ entries }) : textOutput(entries.join(","));
+    }
+    execution.commandId satisfies "catalog.count";
+    // @ts-expect-error Packed presentation context does not weaken command/result correlation.
+    void execution.result.entries;
+    return textOutput(String(execution.result.total));
+  },
+};
+void runNodeCli(catalogProduct, ["list", "--json"], { resultPresenter: shellPresenter });
+void executeNodeCli(product, ["--version"]).then((execution) => {
+  const mode: PresentationMode = execution.presentation;
+  void mode;
+  if (execution.status === "version") {
+    const version: NodeCliVersion = execution;
+    version.packageMetadata.version satisfies string;
+  }
+});
+const modeAwareAdapter: DomainErrorAdapter<ExampleDomainError> = {
+  is: domainErrorAdapter.is,
+  map: (error, presentation) => ({
+    exitCode: 9,
+    stream: "stderr",
+    output: (presentation === "machine" ? JSON.stringify({ code: error.code }) : error.message) + "\\n",
+  }),
+};
+void runNodeCli(product, ["echo", "typed package"], { domainErrorAdapter: modeAwareAdapter });
+const delegatedMode = (request: DelegatedCommandRequest): PresentationMode => request.presentation;
+void delegatedMode;
+// @ts-expect-error Packed presentation mode is a closed union.
+const invalidPresentation: PresentationMode = "json";
+void invalidPresentation;
 
 `,
   );
@@ -470,6 +509,7 @@ assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed", "echo", "7
   status: "success",
   commandId: packedRuntime.commandId,
   result: packedRuntime.result,
+  presentation: "human",
 });
 assert.deepEqual(await node.runNodeCli(runtimeProduct, ["packed", "echo", "7"], {
   resultPresenter: { success: ({ result }) => api.textOutput(String(result.value)) },
@@ -479,6 +519,7 @@ assert.deepEqual(await node.runNodeCli(runtimeProduct, ["packed", "echo", "--hel
 }), { exitCode: 0, stdout: "special help\\n", stderr: "" });
 assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed"]), {
   status: "failure",
+  presentation: "human",
   failureKind: "usage",
   usageFailure: { code: "no-command" },
   usage: ["fixture-cli", "packed", "<command>"],
@@ -578,6 +619,96 @@ assert.equal(api.resolvePaths(paths, {
   env: { APP_DATA: "relative/value" },
   parameters: { projectId: "fixture-1" },
 }).manifest, "/home/user/.local/share/fixture/projects/fixture-1/manifest.json");
+const shellCalls = [];
+const shellCommands = api.defineCommands({
+  "shell.echo": {
+    route: ["echo"],
+    summary: "Echo a value.",
+    input: { value: api.option("--value", z.string()) },
+    result: z.object({ value: z.string().optional() }),
+  },
+});
+const shellHandlers = api.bindHandlers(shellCommands)({
+  "shell.echo": ({ value }) => (shellCalls.push(value), { value }),
+});
+const shellProduct = api.compileProduct({
+  name: "fixture-cli",
+  packageMetadata: { name: "fixture-cli", version: "2.4.1", bin: { "fixture-cli": "./bin/fixture-cli.js" } },
+  commands: shellCommands,
+  handlers: shellHandlers,
+});
+assert.deepEqual(await node.runNodeCli(shellProduct, []), {
+  exitCode: 2,
+  stdout: "",
+  stderr: "error: no command selected\\n\\nUsage: fixture-cli <command>\\n",
+  failureKind: "usage",
+});
+assert.deepEqual(await node.executeNodeCli(shellProduct, ["--version"]), {
+  status: "version",
+  presentation: "human",
+  packageMetadata: shellProduct.packageMetadata,
+});
+assert.deepEqual(await node.runNodeCli(shellProduct, ["--version"]), { exitCode: 0, stdout: "2.4.1\\n", stderr: "" });
+assert.deepEqual(await node.runNodeCli(shellProduct, ["--version", "--json"]), {
+  exitCode: 0,
+  stdout: '{"name":"fixture-cli","version":"2.4.1"}\\n',
+  stderr: "",
+});
+assert.equal((await node.executeNodeCli(shellProduct, ["--version", "--help"])).status, "help");
+assert.equal((await node.executeNodeCli(shellProduct, ["echo", "--version"])).usageFailure.code, "unknown-option");
+const unversioned = api.compileProduct({ name: "fixture-cli", commands: shellCommands, handlers: shellHandlers });
+const unadmittedVersion = await node.executeNodeCli(unversioned, ["--version"]);
+assert.equal(unadmittedVersion.failureKind, "usage");
+assert.equal(unadmittedVersion.usageFailure.code, "unknown-option");
+const machineHelp = await node.executeNodeCli(shellProduct, ["--json", "--help=full"]);
+assert.equal(machineHelp.presentation, "machine");
+assert.equal(machineHelp.mode, "json");
+assert.deepEqual(
+  JSON.parse((await node.runNodeCli(shellProduct, ["--json", "--help=full"])).stdout),
+  JSON.parse((await node.runNodeCli(shellProduct, ["--help=json"])).stdout),
+);
+assert.deepEqual(shellCalls, [], "packed Help and version requests invoke no handler");
+assert.deepEqual(await node.executeNodeCli(shellProduct, ["--json", "echo", "--value", "x", "--json"]), {
+  status: "success",
+  commandId: "shell.echo",
+  result: { value: "x" },
+  presentation: "machine",
+});
+const consumedSelector = await node.executeNodeCli(shellProduct, ["echo", "--value", "--json"]);
+assert.equal(consumedSelector.presentation, "human");
+assert.equal(consumedSelector.result.value, "--json");
+assert.equal((await node.executeNodeCli(shellProduct, ["echo", "--json=1"])).usageFailure.code, "unknown-option");
+assert.deepEqual(shellCalls, ["x", "--json"]);
+assert.deepEqual(
+  await node.runNodeCli(shellProduct, ["echo", "--value", "x", "--json"], {
+    resultPresenter: { success: (execution) => api.textOutput(execution.commandId + " " + execution.presentation + "\\n") },
+  }),
+  { exitCode: 0, stdout: "shell.echo machine\\n", stderr: "" },
+);
+const shellExecutorCalls = [];
+const shellDelegated = {
+  kind: "delegated",
+  id: "remote",
+  commands: [{ id: "remote.run", route: ["remote"], summary: "Run remotely.", fields: [] }],
+  execute: (request) => {
+    shellExecutorCalls.push(request);
+    return { exitCode: 0, stdout: "", stderr: "" };
+  },
+};
+await node.runNodeCli(shellProduct, ["remote", "--json", "--", "--json"], { delegatedSources: [shellDelegated] });
+assert.deepEqual(shellExecutorCalls, [
+  { sourceId: "remote", commandId: "remote.run", route: ["remote"], argv: ["--", "--json"], presentation: "machine" },
+]);
+assert.throws(
+  () => api.compileProduct({
+    name: "fixture-cli",
+    commands: api.defineCommands({
+      run: { route: ["run"], summary: "Run.", input: { json: api.flag("--json") }, result: z.object({}) },
+    }),
+    handlers: { run: () => ({}) },
+  }),
+  (error) => error instanceof api.CanonConstructionError && error.issues[0]?.code === "FLAG_COLLISION",
+);
 
 console.log("packed consumer verified");
 `,
