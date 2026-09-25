@@ -2,6 +2,7 @@ import type { ProjectionCommandSource } from "./source.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
 import type { OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
 import type { CompiledField } from "../command/compiler.js";
+import type { HelpTreeSource } from "./help-model.js";
 import { CanonConstructionError, type CanonConstructionIssue } from "../command/errors.js";
 
 export interface CommandDiscovery {
@@ -40,6 +41,8 @@ export interface DiscoveryProjectionProduct {
   readonly name: string;
   readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly ProjectionCommandSource[];
+  /** Canonical command tree; the help model reads declared groups from it. */
+  readonly tree?: HelpTreeSource;
 }
 
 /** Bounded presentation metadata for one route that is still owned by a consumer. */
@@ -83,24 +86,20 @@ function compareCommands(
           : 0;
 }
 
-export function projectDiscovery(
+/**
+ * Projects machine-readable discovery for a command set. JSON help passes the
+ * command leaves of its canonical help document; discovery passes a route scope.
+ */
+export function projectCommandDiscovery(
   product: DiscoveryProjectionProduct,
-  request: DiscoveryRequest = {},
+  commands: readonly ProjectionCommandSource[],
 ): ProductDiscovery {
-  const commands = product.commands
-    .filter(
-      (command) =>
-        request.route === undefined ||
-        (request.route.length <= command.route.length &&
-          request.route.every((segment, index) => command.route[index] === segment)),
-    )
-    .sort(compareCommands);
   return {
     name: product.name,
     ...(product.packageMetadata === undefined
       ? {}
       : { packageMetadata: projectPackageMetadata(product.packageMetadata) }),
-    commands: commands.map((command) => ({
+    commands: [...commands].sort(compareCommands).map((command) => ({
       id: command.id,
       route: [...command.route],
       summary: command.summary,
@@ -112,6 +111,25 @@ export function projectDiscovery(
       })),
     })),
   };
+}
+
+export function projectDiscovery(
+  product: DiscoveryProjectionProduct,
+  request: DiscoveryRequest = {},
+): ProductDiscovery {
+  return projectCommandDiscovery(
+    product,
+    product.commands.filter(
+      (command) =>
+        request.route === undefined ||
+        (request.route.length <= command.route.length &&
+          request.route.every((segment, index) => command.route[index] === segment)),
+    ),
+  );
+}
+
+function treeGroupRoutes(node: HelpTreeSource): readonly (readonly string[])[] {
+  return node.children.flatMap((child) => (child.kind === "group" ? [child.route, ...treeGroupRoutes(child)] : []));
 }
 
 function routesOverlap(left: readonly string[], right: readonly string[]): boolean {
@@ -180,10 +198,22 @@ export function composeCommandProjection(
     }
   }
 
+  const groupRoutes = product.tree === undefined ? [] : treeGroupRoutes(product.tree);
+  for (const route of legacyRoutes) {
+    if (groupRoutes.some((groupRoute) => groupRoute.join("\u0000") === route.route.join("\u0000"))) {
+      issues.push({
+        code: "AMBIGUOUS_ROUTE_OWNERSHIP",
+        commandId: route.id,
+        message: `command ${route.id} claims declared group route ${route.route.join(" ")}`,
+      });
+    }
+  }
+
   if (issues.length > 0) throw new CanonConstructionError(issues);
 
   return Object.freeze({
     name: product.name,
+    ...(product.tree === undefined ? {} : { tree: product.tree }),
     ...(product.packageMetadata === undefined
       ? {}
       : { packageMetadata: Object.freeze(projectPackageMetadata(product.packageMetadata)) }),
