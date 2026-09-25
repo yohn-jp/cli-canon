@@ -22,12 +22,14 @@ const commands = defineCommands({
 });
 const product = compileProduct({
   name: "atelier",
+  description: "Manage the asset workspace.",
   groups: defineGroups({ assets: { route: ["assets"], summary: "Manage assets." } }),
   commands,
   handlers: bindHandlers(commands)({
     "assets.inspect": ({ name }) => ({ name }),
   }),
 });
+product.description satisfies string | undefined;
 const delegated: DelegatedCommandSource<"external"> = {
   kind: "delegated",
   id: "external",
