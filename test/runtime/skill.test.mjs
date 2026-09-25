@@ -32,7 +32,7 @@ function fixture() {
       input: {
         file: positional(z.string(), { metavar: "file" }),
         out: option("--out", z.string(), { required: true, metavar: "path" }),
-        json: flag("--json"),
+        draft: flag("--draft"),
       },
       result: z.object({ writtenFile: z.string() }),
     },
@@ -86,7 +86,7 @@ test("Skill projection derives command metadata and preserves prose steps", () =
     guidance: "Render the chosen document.",
     prerequisites: ["The document is ready for review."],
     route: ["document", "render"],
-    usage: "fixture document render <file> --out <path> [--json]",
+    usage: "fixture document render <file> --out <path> [--draft]",
     help: { commandId: "document.render" },
     invocation: {
       state: "requires-input",
@@ -111,7 +111,7 @@ test("Skill projection derives command metadata and preserves prose steps", () =
     ["document.review", "document.policy"],
   );
   const expectedText =
-    "Prepare a document for review.\n\nChoose the input document and output location.\n\nRender the chosen document.\nRun: fixture document render <file> --out <path> [--json]\nRequires input: file, out\nRequires prerequisites: The document is ready for review.\nHelp: document.render\n\nCheck the available documents.\nRun: fixture document list\nHelp: document.list\n";
+    "Prepare a document for review.\n\nChoose the input document and output location.\n\nRender the chosen document.\nRun: fixture document render <file> --out <path> [--draft]\nRequires input: file, out\nRequires prerequisites: The document is ready for review.\nHelp: document.render\n\nCheck the available documents.\nRun: fixture document list\nHelp: document.list\n";
   const text = renderSkillText(projected);
   assert.equal(text, expectedText);
   assert.equal(renderSkillText(projected), text);
@@ -193,7 +193,7 @@ test("Skill command bindings derive a ready canonical invocation", () => {
       input: {
         file: positional(z.string()),
         out: option("--out", z.string(), { required: true }),
-        json: flag("--json"),
+        draft: flag("--draft"),
       },
       result: z.object({}),
     },
@@ -205,7 +205,7 @@ test("Skill command bindings derive a ready canonical invocation", () => {
       steps: [
         skillCommand(commands, "render", {
           guidance: "Render now.",
-          bindings: { file: "input.md", out: "out.html", json: true },
+          bindings: { file: "input.md", out: "out.html", draft: true },
         }),
       ],
     },
@@ -216,7 +216,7 @@ test("Skill command bindings derive a ready canonical invocation", () => {
     commandId: "render",
     value: {
       executable: "fixture",
-      argv: ["render", "input.md", "--out", "out.html", "--json"],
+      argv: ["render", "input.md", "--out", "out.html", "--draft"],
     },
   });
 });

@@ -277,6 +277,7 @@ test("execution exposes the validated typed result before terminal projection", 
     status: "success",
     commandId: "architecture.example",
     result: { rendered: "summary example", format: "summary" },
+    presentation: "human",
   });
 
   const terminal = projectNodeCliExecution(execution, {
@@ -430,7 +431,12 @@ test("Node execution delegates route resolution, required input, and decoding to
   ]);
   const canonical = await executeCanonicalCommand(product, request);
   assert.equal(canonical.status, "success");
-  assert.deepEqual(execution, { status: "success", commandId: canonical.commandId, result: canonical.result });
+  assert.deepEqual(execution, {
+    status: "success",
+    commandId: canonical.commandId,
+    result: canonical.result,
+    presentation: "human",
+  });
   assert.deepEqual(calls, [
     { file: "input.md", count: 3, scope: "team", verbose: true },
     { file: "input.md", count: 3, scope: "team", verbose: true },
@@ -456,6 +462,7 @@ test("Node execution delegates route resolution, required input, and decoding to
     failureKind: "usage",
     usageFailure: { code: "missing-required-option", commandId: "document.render", option: "--scope" },
     usage: ["fixture", "document", "render", "<file>", "--count <count>", "--scope <scope>", "[--verbose]"],
+    presentation: "human",
   });
   assert.deepEqual(projectNodeCliExecution(missingAnywhere), {
     exitCode: 2,
@@ -497,6 +504,7 @@ test("argv resolves help, command, unknown, and no-command on the canonical runt
   assert.deepEqual(helpIntent.outcome, {
     status: "help",
     help: { mode: "summary", request: { kind: "command", commandId: "document.render", mode: "text" } },
+    presentation: "human",
   });
   assert.deepEqual(helpIntent.calls, [], "help intent resolves before any backend grammar parsing");
 
@@ -505,6 +513,7 @@ test("argv resolves help, command, unknown, and no-command on the canonical runt
     status: "failure",
     failureKind: "usage",
     usageFailure: { code: "invalid-help-mode", route: [], value: "brief" },
+    presentation: "human",
   });
   assert.deepEqual(invalidHelp.calls, []);
 
@@ -514,6 +523,7 @@ test("argv resolves help, command, unknown, and no-command on the canonical runt
     commandId: "document.render",
     route: ["document", "render"],
     result: { file: "input.md", count: 3, scope: "team", verbose: false },
+    presentation: "human",
   });
   assert.deepEqual(command.calls, [
     ["leading", { kind: "root" }, ["document", "render", "input.md"]],
@@ -526,6 +536,7 @@ test("argv resolves help, command, unknown, and no-command on the canonical runt
     status: "failure",
     failureKind: "usage",
     usageFailure: { code: "unknown-command", route: ["document", "missing"] },
+    presentation: "human",
   });
   assert.equal(
     unknown.calls.some(([kind]) => kind === "command"),
@@ -541,6 +552,7 @@ test("argv resolves help, command, unknown, and no-command on the canonical runt
       status: "failure",
       failureKind: "usage",
       usageFailure: { code: "no-command", route },
+      presentation: "human",
     });
     assert.equal(
       noCommand.calls.some(([kind]) => kind === "command"),
@@ -556,7 +568,12 @@ test("argv resolves help, command, unknown, and no-command on the canonical runt
       parseCommand: () => assert.fail("grammar failures stop before command parsing"),
     },
   });
-  assert.deepEqual(grammar, { status: "failure", failureKind: "grammar", grammarFailure: { code: "unknown-option" } });
+  assert.deepEqual(grammar, {
+    status: "failure",
+    failureKind: "grammar",
+    grammarFailure: { code: "unknown-option" },
+    presentation: "human",
+  });
   assert.equal(handlerCalls.length, 1);
 });
 
@@ -793,6 +810,7 @@ test("composed dispatch executes Canon-owned routes through the semantic runtime
     status: "success",
     commandId: "architecture.example",
     result: { rendered: "full example" },
+    presentation: "human",
   });
   assert.deepEqual(handlerCalls, ["full"]);
   assert.deepEqual(executorCalls, [], "canonical owners never cross the delegated executor boundary");
@@ -803,7 +821,13 @@ test("composed dispatch invokes only the declared delegated executor for delegat
   const result = await runNodeCli(product, ["auth", "login", "--account", "team"], { delegatedSources: [delegated] });
   assert.deepEqual(result, { exitCode: 0, stdout: "external.auth.login --account team\n", stderr: "" });
   assert.deepEqual(executorCalls, [
-    { sourceId: "external", commandId: "external.auth.login", route: ["auth", "login"], argv: ["--account", "team"] },
+    {
+      sourceId: "external",
+      commandId: "external.auth.login",
+      route: ["auth", "login"],
+      argv: ["--account", "team"],
+      presentation: "human",
+    },
   ]);
   assert.deepEqual(handlerCalls, []);
 });
@@ -822,6 +846,7 @@ test("shared-group canonical and delegated siblings resolve to their own owners"
     sourceId: "external",
     commandId: "external.architecture.zones",
     result: { exitCode: 0, stdout: "external.architecture.zones --all\n", stderr: "" },
+    presentation: "human",
   });
   assert.deepEqual(handlerCalls, [undefined]);
   assert.deepEqual(
@@ -854,7 +879,13 @@ test("unknown-command is reported only after resolution fails across all compose
     const execution = await executeNodeCli(product, argv, { delegatedSources: [delegated] });
     assert.deepEqual(
       execution,
-      { status: "failure", failureKind: "usage", usageFailure: { code: "unknown-command" }, usage },
+      {
+        status: "failure",
+        presentation: "human",
+        failureKind: "usage",
+        usageFailure: { code: "unknown-command" },
+        usage,
+      },
       argv.join(" "),
     );
     const outcome = await executeComposedArgv(
@@ -865,6 +896,7 @@ test("unknown-command is reported only after resolution fails across all compose
       status: "failure",
       failureKind: "usage",
       usageFailure: { code: "unknown-command", route },
+      presentation: "human",
     });
   }
   for (const [argv, usage] of [
@@ -913,7 +945,12 @@ test("no canonical usage, validation, or domain failure falls back to a delegate
 test("delegated executor failures stay with the delegated owner", async () => {
   const { product, delegated, handlerCalls, executorCalls } = composedFixture({ executorThrows: true });
   const execution = await executeNodeCli(product, ["architecture", "zones"], { delegatedSources: [delegated] });
-  assert.deepEqual(execution, { status: "failure", failureKind: "handler-error", error: { code: "DELEGATED_FAILED" } });
+  assert.deepEqual(execution, {
+    status: "failure",
+    presentation: "human",
+    failureKind: "handler-error",
+    error: { code: "DELEGATED_FAILED" },
+  });
   assert.equal(executorCalls.length, 1);
   assert.deepEqual(handlerCalls, [], "delegated failures never dispatch to the canonical runtime");
 });
@@ -966,6 +1003,7 @@ test("composed argv runtime selects the owner before parsing command grammar", a
     commandId: "external.architecture.zones",
     route: ["architecture", "zones"],
     result: { exitCode: 0, stdout: "external.architecture.zones --all\n", stderr: "" },
+    presentation: "human",
   });
   assert.equal(
     recording.calls.some(([kind]) => kind === "command"),
@@ -983,6 +1021,7 @@ test("composed argv runtime selects the owner before parsing command grammar", a
     commandId: "architecture.example",
     route: ["architecture", "example"],
     result: { rendered: "full example" },
+    presentation: "human",
   });
   assert.deepEqual(canonicalRecording.calls.at(-1), ["command", "architecture.example", [], "root-state"]);
 

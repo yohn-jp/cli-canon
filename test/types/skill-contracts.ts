@@ -14,7 +14,7 @@ const commands = defineCommands({
     input: {
       file: positional(z.string()),
       out: option("--out", z.string(), { required: true }),
-      json: flag("--json"),
+      draft: flag("--draft"),
     },
     result: z.object({ writtenFile: z.string() }),
   },

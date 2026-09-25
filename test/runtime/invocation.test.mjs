@@ -22,7 +22,7 @@ function fixture() {
         target: positional(z.string()),
         out: option("--out", z.string(), { required: true }),
         format: option("--format", z.enum(["full", "json"]), { valueArity: "optional" }),
-        json: flag("--json"),
+        draft: flag("--draft"),
         tag: option("--tag", z.string(), { repeatable: true }),
         args: rawArgs(),
       },
@@ -41,7 +41,7 @@ test("canonical invocation lowers typed field bindings to executable and argv", 
     target: "input",
     out: "out.html",
     format: "full",
-    json: true,
+    draft: true,
     tag: ["a", "b"],
     args: ["--literal", "tail"],
   });
@@ -58,7 +58,7 @@ test("canonical invocation lowers typed field bindings to executable and argv", 
         "out.html",
         "--format",
         "full",
-        "--json",
+        "--draft",
         "--tag",
         "a",
         "--tag",
@@ -88,7 +88,7 @@ test("canonical invocation lowers typed field bindings to executable and argv", 
 });
 
 test("missing required invocation bindings stay non-executable", () => {
-  const projected = projectInvocation(fixture(), "deploy.run", { json: true });
+  const projected = projectInvocation(fixture(), "deploy.run", { draft: true });
   assert.deepEqual(projected, {
     state: "requires-input",
     commandId: "deploy.run",
@@ -109,7 +109,7 @@ test("invalid invocation bindings fail explicitly", () => {
     { unknown: "value" },
     { target: 1, out: "out.html" },
     { target: "input", out: false },
-    { target: "input", out: "out.html", json: "yes" },
+    { target: "input", out: "out.html", draft: "yes" },
     { target: "input", out: "out.html", tag: "not-an-array" },
     { target: "input", out: "out.html", args: ["ok", 1] },
   ]) {

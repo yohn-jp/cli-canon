@@ -1,7 +1,10 @@
 import type { CommandCatalog, CommandDefinition, CommandId, FieldDefinition } from "../command/model.js";
 import type { CommandTreeChildNode, CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
 import type { ComposedCommandNode } from "../composition/model.js";
-import { parseHelpMode, type ParsedHelpMode } from "../projection/help.js";
+import type { PresentationMode } from "../output/model.js";
+import type { ProductPackageIdentity } from "../product/identity.js";
+import type { ParsedHelpMode } from "../projection/help.js";
+import { parsedHelpFromScan, scanShellArgv } from "../projection/shell-scan.js";
 import {
   CanonicalRequestError,
   type CanonicalArgvOutcome,
@@ -282,9 +285,9 @@ function resolveArgvRoute<Node extends ArgvTreeNode & { readonly kind: "command"
 /**
  * Executes one argv invocation through the canonical runtime path.
  *
- * Help intent, route/command resolution, and unknown/no-command classification are
- * owned here; the backend only parses argv grammar. A resolved command is executed
- * without re-resolving its route.
+ * Standard shell controls, help intent, route/command resolution, and
+ * unknown/no-command classification are owned here; the backend only parses argv
+ * grammar. A resolved command is executed without re-resolving its route.
  */
 export async function executeCanonicalArgv<const Catalog extends CommandCatalog, Failure, RootState = unknown>(
   product: CanonicalRuntimeProduct<Catalog>,
@@ -298,71 +301,117 @@ export async function executeCanonicalArgv<const Catalog extends CommandCatalog,
   return executeResolvedArgv(product, resolution.node, resolution, request);
 }
 
+type ArgvCommandResolution<Node, Failure, RootState> = Extract<
+  ArgvRouteResolution<Node, Failure, RootState>,
+  { readonly kind: "command" }
+> & { readonly presentation: PresentationMode };
+
 type ArgvRequestResolution<Node, Failure, RootState> =
-  | Extract<ArgvRouteResolution<Node, Failure, RootState>, { readonly kind: "command" }>
+  | ArgvCommandResolution<Node, Failure, RootState>
   | {
       readonly kind: "outcome";
-      readonly outcome:
+      readonly outcome: (
         | { readonly status: "help"; readonly help: ParsedHelpMode }
-        | Extract<CanonicalArgvOutcome<CommandCatalog, Failure>, { readonly failureKind: "usage" | "grammar" }>
-        | { readonly status: "failure"; readonly failureKind: "unexpected"; readonly error: unknown };
+        | { readonly status: "version"; readonly packageMetadata: ProductPackageIdentity }
+        | { readonly status: "failure"; readonly failureKind: "usage"; readonly usageFailure: CanonicalUsageFailure }
+        | { readonly status: "failure"; readonly failureKind: "grammar"; readonly grammarFailure: Failure }
+        | { readonly status: "failure"; readonly failureKind: "unexpected"; readonly error: unknown }
+      ) & { readonly presentation: PresentationMode };
     };
 
-/** Resolves help intent, then the command route; nothing is parsed for a command or executed here. */
+function withPresentation<Outcome extends object>(
+  outcome: Outcome,
+  presentation: PresentationMode,
+): Outcome & { readonly presentation: PresentationMode } {
+  const next = { ...outcome, presentation };
+  return Object.isFrozen(outcome) ? Object.freeze(next) : next;
+}
+
+/**
+ * Resolves the standard shell once, then the command route; nothing is parsed for a
+ * command or executed here.
+ *
+ * Shell order: one route-scoped scan classifies Help and `--json` tokens; every scanned
+ * `--json` selects `machine` presentation and is removed from the argv seen by the
+ * grammar backend and delegated executors; Help wins over version and route resolution;
+ * the remaining argv exactly `["--version"]` is a version request when package metadata
+ * is present; otherwise the remaining argv resolves as a route, so empty argv is `no-command`.
+ */
 function resolveArgvRequest<Node extends ArgvTreeNode & { readonly kind: "command" }, Failure, RootState>(
   children: readonly ArgvTreeNode[],
   request: CanonicalArgvRequest<Failure, RootState>,
 ): ArgvRequestResolution<Node, Failure, RootState> {
+  let presentation: PresentationMode = "human";
   let resolution: ArgvRouteResolution<Node, Failure, RootState>;
   try {
-    const help = parseHelpMode(request.help, request.argv, request.helpFormat);
+    const shell = scanShellArgv(request.help, request.argv);
+    if (shell.json) presentation = "machine";
+    const help = parsedHelpFromScan(shell, presentation === "machine" ? "json" : request.helpFormat);
     if (help !== undefined) {
-      if (help.invalidMode === undefined) return { kind: "outcome", outcome: { status: "help", help } };
+      if (help.invalidMode === undefined) return { kind: "outcome", outcome: { status: "help", help, presentation } };
       return {
         kind: "outcome",
         outcome: {
           status: "failure",
           failureKind: "usage",
           usageFailure: { code: "invalid-help-mode", route: Object.freeze([]), value: help.invalidMode },
+          presentation,
         },
       };
     }
-    resolution = resolveArgvRoute<Node, Failure, RootState>(children, request);
+    const { packageMetadata } = request;
+    if (packageMetadata !== undefined && shell.argv.length === 1 && shell.argv[0] === "--version") {
+      return { kind: "outcome", outcome: { status: "version", packageMetadata, presentation } };
+    }
+    resolution = resolveArgvRoute<Node, Failure, RootState>(children, { ...request, argv: shell.argv });
   } catch (error) {
-    return { kind: "outcome", outcome: { status: "failure", failureKind: "unexpected", error } };
+    return { kind: "outcome", outcome: { status: "failure", failureKind: "unexpected", error, presentation } };
   }
   if (resolution.kind === "grammar") {
     return {
       kind: "outcome",
-      outcome: { status: "failure", failureKind: "grammar", grammarFailure: resolution.failure },
+      outcome: { status: "failure", failureKind: "grammar", grammarFailure: resolution.failure, presentation },
     };
   }
   if (resolution.kind === "usage") {
     return {
       kind: "outcome",
-      outcome: { status: "failure", failureKind: "usage", usageFailure: resolution.usageFailure },
+      outcome: { status: "failure", failureKind: "usage", usageFailure: resolution.usageFailure, presentation },
     };
   }
-  return resolution;
+  return { ...resolution, presentation };
 }
 
 /** Parses the argv following a resolved canonical command and executes it without re-resolving its route. */
 async function executeResolvedArgv<const Catalog extends CommandCatalog, Failure, RootState>(
   product: CanonicalRuntimeProduct<Catalog>,
   node: CommandTreeCommandNode,
-  resolution: { readonly route: readonly string[]; readonly tail: readonly string[]; readonly root: RootState },
+  resolution: {
+    readonly route: readonly string[];
+    readonly tail: readonly string[];
+    readonly root: RootState;
+    readonly presentation: PresentationMode;
+  },
   request: CanonicalArgvRequest<Failure, RootState>,
 ): Promise<CanonicalArgvOutcome<Catalog, Failure>> {
+  const { presentation } = resolution;
   let parsed: ReturnType<CanonicalArgvRequest<Failure, RootState>["backend"]["parseCommand"]>;
   try {
     parsed = request.backend.parseCommand(node, resolution.tail, resolution.root);
   } catch (error) {
-    return { status: "failure", failureKind: "unexpected", commandId: node.id as CommandId<Catalog>, error };
+    return {
+      status: "failure",
+      failureKind: "unexpected",
+      commandId: node.id as CommandId<Catalog>,
+      error,
+      presentation,
+    };
   }
   if (parsed.status === "failure") {
-    return { status: "failure", failureKind: "grammar", grammarFailure: parsed.failure };
+    return { status: "failure", failureKind: "grammar", grammarFailure: parsed.failure, presentation };
   }
-  return executeCommandNode(product, node, resolution.route, parsed.input);
+  const outcome = await executeCommandNode(product, node, resolution.route, parsed.input);
+  return withPresentation(outcome, presentation) as CanonicalArgvOutcome<Catalog, Failure>;
 }
 
 function findCanonicalCommand(
@@ -383,8 +432,9 @@ function findCanonicalCommand(
 /**
  * Executes one argv invocation against a composed command tree.
  *
- * Help intent and the command route are resolved structurally against the composed
- * tree before any executor runs; help never invokes a delegated executor. The resolved
+ * Standard shell controls, help intent, and the command route are resolved structurally
+ * against the composed tree before any executor runs; help and version never invoke a
+ * delegated executor. The resolved
  * node's owner selects exactly one executor: canonical owners execute through the
  * semantic runtime and delegated owners cross their one explicit executor boundary.
  * `unknown-command` means no source owns the route. No outcome of the selected owner,
@@ -405,7 +455,7 @@ export async function executeComposedArgv<
   );
   if (resolution.kind !== "command") return resolution.outcome;
 
-  const { node } = resolution;
+  const { node, presentation } = resolution;
   const { kind, sourceId } = node.owner;
   const source = product.sources.find((candidate) => candidate.id === sourceId && candidate.kind === kind);
   if (source?.kind === "delegated") {
@@ -414,17 +464,31 @@ export async function executeComposedArgv<
         status: "failure",
         failureKind: "unexpected",
         error: new CanonicalRequestError(`${node.id}: delegated source ${sourceId} declares no executor`),
+        presentation,
       };
     }
     let result: Result;
     try {
       result = await source.execute(
-        Object.freeze({ sourceId, commandId: node.id, route: node.route, argv: Object.freeze([...resolution.tail]) }),
+        Object.freeze({
+          sourceId,
+          commandId: node.id,
+          route: node.route,
+          argv: Object.freeze([...resolution.tail]),
+          presentation,
+        }),
       );
     } catch (error) {
-      return { status: "failure", failureKind: "delegated-error", sourceId, commandId: node.id, error };
+      return { status: "failure", failureKind: "delegated-error", sourceId, commandId: node.id, error, presentation };
     }
-    return Object.freeze({ status: "delegated", sourceId, commandId: node.id, route: node.route, result });
+    return Object.freeze({
+      status: "delegated",
+      sourceId,
+      commandId: node.id,
+      route: node.route,
+      result,
+      presentation,
+    });
   }
 
   const canonical =
@@ -436,6 +500,7 @@ export async function executeComposedArgv<
       status: "failure",
       failureKind: "unexpected",
       error: new CanonicalRequestError(`${node.id}: composed owner ${sourceId} has no matching ${kind} source`),
+      presentation,
     };
   }
   return executeResolvedArgv(source.product as CanonicalRuntimeProduct, canonical, resolution, request);

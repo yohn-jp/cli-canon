@@ -3,6 +3,14 @@ export type CliFailureKind =
 
 export type CliStream = "stdout" | "stderr";
 
+/**
+ * Invocation presentation mode resolved once by the Canon standard shell.
+ *
+ * `machine` is selected by the `--json` shell token; otherwise the mode is `human`.
+ * The mode changes encoding only, never stream or exit code.
+ */
+export type PresentationMode = "human" | "machine";
+
 export interface CliSuccess {
   readonly status: "success";
   readonly stream: "stdout";
@@ -49,8 +57,11 @@ export interface DomainFailureMapping {
   readonly output: string;
 }
 
-/** A product-owned type guard and mapping; CLI Canon assigns only the domain classification. */
+/**
+ * A product-owned type guard and mapping; CLI Canon assigns only the domain classification.
+ * `map` receives the invocation's Canon-resolved presentation mode.
+ */
 export interface DomainErrorAdapter<DomainError> {
   readonly is: (error: unknown) => error is DomainError;
-  readonly map: (error: DomainError) => DomainFailureMapping;
+  readonly map: (error: DomainError, presentation: PresentationMode) => DomainFailureMapping;
 }

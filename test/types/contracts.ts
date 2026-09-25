@@ -24,7 +24,7 @@ const commands = defineCommands({
       target: positional(z.string(), { required: false, description: "Optional destination." }),
       out: option("--out", z.string().min(1), { aliases: ["-o"], required: true }),
       format: option("--format", z.enum(["full", "json"]), { valueArity: "optional" }),
-      json: flag("--json", { placement: "anywhere" }),
+      draft: flag("--draft", { placement: "anywhere" }),
       tag: option("--tag", z.string(), { repeatable: true }),
       args: rawArgs(),
     },
@@ -40,14 +40,14 @@ const invalidId: Id = "document.missing";
 void invalidId;
 
 const handlers = bindHandlers(commands)({
-  "document.render": async ({ file, target, out, format, json, tag, args }) => {
+  "document.render": async ({ file, target, out, format, draft, tag, args }) => {
     file satisfies string;
     target satisfies string | undefined;
     // @ts-expect-error optional positionals can be absent.
     target.toUpperCase();
     out satisfies string;
     format satisfies "full" | "json" | undefined;
-    json satisfies boolean;
+    draft satisfies boolean;
     tag satisfies readonly string[];
     args satisfies readonly string[];
     return { writtenFile: out };

@@ -29,7 +29,7 @@ function fixture() {
         out: option("--out", z.string().min(1), { required: true }),
         level: option("--level", z.coerce.number().int(), { valueArity: "optional" }),
         tag: option("--tag", z.string().min(1), { repeatable: true }),
-        json: flag("--json"),
+        draft: flag("--draft"),
         args: rawArgs(),
       },
       result: z.object({ writtenFile: z.string(), level: z.number().optional(), tags: z.array(z.string()) }),
@@ -75,7 +75,7 @@ test("typed success exposes command identity and validated result before present
   const { product, calls } = fixture();
   const outcome = await executeCanonicalCommand(product, {
     route: ["document", "render"],
-    input: { file: "in.md", out: "out.md", level: "3", tag: ["a", "b"], json: true, args: ["--x"] },
+    input: { file: "in.md", out: "out.md", level: "3", tag: ["a", "b"], draft: true, args: ["--x"] },
   });
   assert.deepEqual(outcome, {
     status: "success",
@@ -83,7 +83,7 @@ test("typed success exposes command identity and validated result before present
     route: ["document", "render"],
     result: { writtenFile: "out.md", level: 3, tags: ["a", "b"] },
   });
-  assert.deepEqual(calls, [{ file: "in.md", out: "out.md", level: 3, tag: ["a", "b"], json: true, args: ["--x"] }]);
+  assert.deepEqual(calls, [{ file: "in.md", out: "out.md", level: 3, tag: ["a", "b"], draft: true, args: ["--x"] }]);
   assert.equal("stdout" in outcome, false);
   assert.equal("exitCode" in outcome, false);
 });
@@ -95,7 +95,7 @@ test("handlers receive decoded values for omitted optional tokens", async () => 
     input: { file: "in.md", out: "out.md", level: true, tag: [] },
   });
   assert.equal(outcome.status, "success");
-  assert.deepEqual(calls, [{ file: "in.md", out: "out.md", level: undefined, tag: [], json: false, args: [] }]);
+  assert.deepEqual(calls, [{ file: "in.md", out: "out.md", level: undefined, tag: [], draft: false, args: [] }]);
 });
 
 test("input decode failure is a validation failure and the handler is not invoked", async () => {
