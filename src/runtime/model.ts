@@ -1,5 +1,5 @@
 import type { HandlerMap } from "../command/handlers.js";
-import type { CommandCatalog, CommandId, CommandResultOutput, GroupCatalog } from "../command/model.js";
+import type { CommandCatalog, CommandId, CommandResultOutput } from "../command/model.js";
 import type { CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
 import type { CanonicalCommandSource, ComposedCommandTree, DelegatedCommandSource } from "../composition/model.js";
 import type { HelpOutputMode, HelpProjectionProduct, ParsedHelpMode } from "../projection/help.js";
@@ -24,7 +24,7 @@ export interface CanonicalCommandRequest {
 
 /** The compiled product surface the semantic runtime consumes. */
 export interface CanonicalRuntimeProduct<Catalog extends CommandCatalog = CommandCatalog> {
-  readonly tree: CommandTreeRootNode<GroupCatalog, Catalog>;
+  readonly tree: CommandTreeRootNode<any, Catalog>;
   readonly handlers: HandlerMap<Catalog>;
 }
 
