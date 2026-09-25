@@ -14,3 +14,4 @@ export * from "./skill/index.js";
 export * from "./path/index.js";
 export * from "./output/index.js";
 export * from "./runtime/index.js";
+export * from "./composition/index.js";
