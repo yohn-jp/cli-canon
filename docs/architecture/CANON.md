@@ -205,6 +205,17 @@ Group IDs are inferred from the `defineGroups` declaration keys, as command IDs 
 
 Authority boundary: the consumer product owns product/domain content, including group and command IDs, route tokens, summaries, descriptions, and examples. CLI Canon owns the standard CLI structure vocabulary, the runtime, and presentation derived from it. Group metadata is generic presentation content, not product logic.
 
+### 6.2 Canonical help document
+
+Help has one semantic authority: the help document projected by `projectHelpDocument` from the canonical tree and compiled command fields. Text help and JSON help consume this document; neither rebuilds route structure nor carries independent route or flag authority.
+
+- A help target is explicit: `root`, a declared `group`, or a `command`. An undeclared shared route prefix is not a target and has no inferred summary; commands under it are listed from their nearest declared ancestor with their remaining route segments.
+- The document carries the resolved target, derived usage tokens, target summary/description, arguments, options, children, examples, and the command leaves of the target subtree.
+- Usage is derived from the route and declared field grammar; it is never a maintained string.
+- Group content comes from the group declaration, never from a descendant command.
+- `summary` (`--help`) contains usage, target summary, and child summaries. `full` (`--help=full`) adds target description, arguments, options, child descriptions, and examples. `json` (`--help=json`) is the discovery projection of the same document's command leaves.
+- Bounded legacy route descriptors attach under the declared group owning their longest proper route prefix, or under the root; a legacy route cannot claim a declared group route.
+
 ## 7. Input Canon
 
 CLI syntax and value semantics are related but distinct.

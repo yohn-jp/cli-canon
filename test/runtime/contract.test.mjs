@@ -100,7 +100,11 @@ function helpFixture() {
     "domain.list": () => ({}),
     "domain.show": () => ({}),
   });
-  return compileProduct({ name: "fixture", commands, handlers });
+  const groups = defineGroups({
+    document: { route: ["document"], summary: "Work with input documents." },
+    domain: { route: ["domain"], summary: "Browse domain records." },
+  });
+  return compileProduct({ name: "fixture", commands, handlers, groups });
 }
 
 test("one command canon drives routing, validation, result validation, and output", async () => {
@@ -197,8 +201,9 @@ test("option-looking tokens are consumed as required option values by the M0 gra
 test("text help and JSON discovery are projections of the compiled product", async () => {
   const product = fixture();
   const help = renderHelp(product);
-  assert.match(help, /document\t/);
-  assert.match(renderHelp(product, { kind: "route", route: ["document"] }), /render\t/);
+  assert.match(help, /document render\t/);
+  assert.match(renderHelp(product, { kind: "route", route: ["document", "render"] }), /--out/);
+  assert.equal(renderHelp(product, { kind: "route", route: ["document"] }), "Unknown command route: document\n");
   assert.match(renderHelp(product, { kind: "command", commandId: "document.render" }), /--out/);
   const discovery = projectDiscovery(product);
   assert.equal(
@@ -226,7 +231,7 @@ test("help and discovery order is deterministic across declaration insertion ord
     },
   };
   const expectedHelp =
-    "Usage: fixture <command>\n\nCommands:\n  alpha\tShow alpha.\n  zeta\tRun zeta.\n\nHelp: --help[=full|json]\n";
+    "Usage: fixture <command>\n\nCommands:\n  alpha show\tShow alpha.\n  zeta run\tRun zeta.\n\nHelp: --help[=full|json]\n";
   const expectedDiscovery = {
     name: "fixture",
     commands: [
@@ -275,11 +280,11 @@ test("progressive text, full, and JSON help share command canon metadata", async
   const product = helpFixture();
   assert.equal(
     renderHelp(product),
-    "Usage: fixture <command>\n\nCommands:\n  document\tInspect an input file.\n  domain\tList domain records.\n\nHelp: --help[=full|json]\n",
+    "Usage: fixture <command>\n\nCommands:\n  document\tWork with input documents.\n  domain\tBrowse domain records.\n\nHelp: --help[=full|json]\n",
   );
   assert.equal(
     renderHelp(product, { kind: "route", route: ["domain"] }),
-    "Usage: fixture domain <command>\n\nCommands:\n  list\tList domain records.\n  show\tShow one domain record.\n\nHelp: --help[=full|json]\n",
+    "Usage: fixture domain <command>\n\nBrowse domain records.\n\nCommands:\n  list\tList domain records.\n  show\tShow one domain record.\n\nHelp: --help[=full|json]\n",
   );
   assert.equal(
     renderHelp(product, { kind: "command", commandId: "document.inspect", mode: "full" }),
@@ -360,17 +365,24 @@ test("architecture example progressive help uses only the Command Canon", async 
   const product = compileProduct({
     name: "fixture",
     commands,
+    groups: defineGroups({
+      architecture: {
+        route: ["architecture"],
+        summary: "Browse architecture examples.",
+        description: "Examples come from the canonical architecture.",
+      },
+    }),
     handlers: bindHandlers(commands)({ "architecture.example": () => ({}) }),
   });
 
   assert.equal(
     (await runNodeCli(product, ["--help"])).stdout,
-    "Usage: fixture <command>\n\nCommands:\n  architecture\tShow an architecture example.\n\nHelp: --help[=full|json]\n",
+    "Usage: fixture <command>\n\nCommands:\n  architecture\tBrowse architecture examples.\n\nHelp: --help[=full|json]\n",
   );
   const domainHelp = await runNodeCli(product, ["architecture", "--help=full"]);
   assert.equal(
     domainHelp.stdout,
-    "Usage: fixture architecture <command>\n\nCommands:\n  example\tShow an architecture example.\n    Read one example from the canonical architecture.\n\nHelp: --help[=full|json]\n",
+    "Usage: fixture architecture <command>\n\nBrowse architecture examples.\n\nExamples come from the canonical architecture.\n\nCommands:\n  example\tShow an architecture example.\n    Read one example from the canonical architecture.\n\nHelp: --help[=full|json]\n",
   );
 
   const leafHelp = await runNodeCli(product, ["architecture", "example", "--help=full"]);

@@ -7,6 +7,7 @@ import {
   compileProduct,
   composeCommandProjection,
   defineCommands,
+  defineGroups,
   option,
   parseHelpMode,
   projectHelp,
@@ -39,7 +40,8 @@ function architectureFixture() {
       return { rendered: format === "full" ? "full example" : "summary example", format: format ?? "summary" };
     },
   });
-  const product = compileProduct({ name: "fixture", commands, handlers });
+  const groups = defineGroups({ architecture: { route: ["architecture"], summary: "Browse architecture examples." } });
+  const product = compileProduct({ name: "fixture", commands, handlers, groups });
   const legacyRoutes = [
     {
       id: "legacy.auth.login",
@@ -104,8 +106,8 @@ test("mixed route projection composes summary, full, and JSON help from one boun
   const projection = composeCommandProjection(product, legacyRoutes);
 
   const root = renderHelp(projection);
-  assert.match(root, /architecture\tShow an architecture example\./);
-  assert.match(root, /auth\tSign in to a service\./);
+  assert.match(root, /architecture\tBrowse architecture examples\./);
+  assert.match(root, /auth login\tSign in to a service\./);
   assert.match(root, /guide\tOpen the product guide\./);
   assert.deepEqual(
     projectDiscovery(projection, { route: ["architecture"] }).commands.map(({ id }) => id),
@@ -206,7 +208,10 @@ test("mixed route composition rejects duplicate and overlapping ownership determ
   );
   assert.throws(
     () => composeCommandProjection(product, [...legacyRoutes, descriptor("legacy.parent", ["architecture"])]),
-    (error) => error instanceof CanonConstructionError && error.issues[0]?.code === "OVERLAPPING_ROUTE",
+    (error) =>
+      error instanceof CanonConstructionError &&
+      error.issues[0]?.code === "OVERLAPPING_ROUTE" &&
+      error.issues.some((issue) => issue.code === "AMBIGUOUS_ROUTE_OWNERSHIP" && issue.commandId === "legacy.parent"),
   );
   assert.throws(
     () => composeCommandProjection(product, [descriptor("legacy.child", ["architecture", "example", "details"])]),
