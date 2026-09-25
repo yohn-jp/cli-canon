@@ -406,6 +406,32 @@ api.writeCliOutcome(output, {
   writeStderr: (text) => writes.push(["stderr", text]),
 });
 assert.deepEqual(writes, [["stdout", expectedJson]]);
+const runtimeCommands = api.defineCommands({
+  "packed.echo": {
+    route: ["packed", "echo"],
+    summary: "Echo a packed value.",
+    input: { value: api.positional(z.coerce.number().int()) },
+    result: z.object({ value: z.number() }),
+  },
+});
+const runtimeProduct = api.compileProduct({
+  name: "fixture-cli",
+  commands: runtimeCommands,
+  groups: api.defineGroups({ packed: { route: ["packed"], summary: "Packed commands." } }),
+  handlers: api.bindHandlers(runtimeCommands)({ "packed.echo": ({ value }) => ({ value }) }),
+});
+const packedRuntime = await api.executeCanonicalCommand(runtimeProduct, { route: ["packed", "echo"], input: { value: "7" } });
+assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed", "echo", "7"]), {
+  status: "success",
+  commandId: packedRuntime.commandId,
+  result: packedRuntime.result,
+});
+assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed"]), {
+  status: "failure",
+  failureKind: "usage",
+  usageFailure: { code: "no-command" },
+});
+assert.equal((await node.executeNodeCli(runtimeProduct, ["packed", "echo", "x"])).failureKind, "validation");
 const nonFinite = api.jsonOutput({ value: Number.NaN });
 assert.equal(nonFinite.status, "failure");
 assert.equal(nonFinite.failureKind, "serialization");
