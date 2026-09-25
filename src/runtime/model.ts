@@ -131,6 +131,7 @@ export interface CanonicalArgvRequest<Failure, RootState = unknown> {
   /** Help surface against which the runtime resolves help intent before any grammar parsing. */
   readonly help: HelpProjectionProduct;
   readonly helpFormat?: HelpOutputMode | "text";
+}
 
 /** Attaches the invocation's Canon-resolved presentation mode to each outcome member. */
 type WithPresentation<Outcome> = Outcome extends unknown
