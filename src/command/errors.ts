@@ -1,6 +1,10 @@
 export type CanonConstructionErrorCode =
   | "DUPLICATE_ROUTE"
   | "DUPLICATE_COMMAND_ID"
+  | "DUPLICATE_NODE_ID"
+  | "AMBIGUOUS_ROUTE_OWNERSHIP"
+  | "INVALID_PARENT"
+  | "INVALID_GROUP_DECLARATION"
   | "OVERLAPPING_ROUTE"
   | "FLAG_COLLISION"
   | "INVALID_FLAG"
@@ -11,12 +15,16 @@ export type CanonConstructionErrorCode =
   | "INVALID_PROJECTION"
   | "UNSUPPORTED_SCHEMA_PROJECTION"
   | "INVALID_INPUT_GRAMMAR"
-  | "UNSUPPORTED_GRAMMAR";
+  | "UNSUPPORTED_GRAMMAR"
+  | "INVALID_COMMAND_SOURCE"
+  | "DUPLICATE_COMMAND_SOURCE";
 
 export interface CanonConstructionIssue {
   readonly code: CanonConstructionErrorCode;
   readonly commandId?: string;
+  readonly groupId?: string;
   readonly skillId?: string;
+  readonly sourceId?: string;
   readonly field?: string;
   readonly fields?: readonly string[];
   readonly message: string;

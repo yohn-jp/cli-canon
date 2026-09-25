@@ -71,7 +71,7 @@ try {
     ),
   );
 
-  for (const filename of ["fixture-scenario.mjs", "fixture-oracle.mjs"]) {
+  for (const filename of ["fixture-scenario.mjs", "fixture-oracle.mjs", "composition-certification.mjs"]) {
     copyFileSync(path.join(testDirectory, "..", "runtime", filename), path.join(consumer, filename));
   }
   for (const filename of ["failure.test.mjs", "passing.test.mjs"]) {
@@ -88,6 +88,7 @@ import {
   compileProduct,
   composeCommandProjection,
   defineCommands,
+  defineGroups,
   definePaths,
   jsonOutput,
   option,
@@ -98,7 +99,9 @@ import {
   type CliIO,
   type CliOutcome,
   type CommandId,
+  type CommandTreeRootNode,
   type DomainErrorAdapter,
+  type GroupId,
   type PathId,
   type PathParameterName,
   projectProductSchemas,
@@ -113,6 +116,8 @@ import {
   executeNodeCli,
   projectNodeCliExecution,
   runNodeCli,
+  type NodeCliResultPresenter,
+  type NodeCliSpecialTerminalSurface,
   type NodeCliTerminalAdapter,
   type StructuredUsageErrorCode,
 } from "@yohn-jp/cli-canon/node";
@@ -157,6 +162,13 @@ const legacyRoutes = [{ id: "legacy.status", route: ["status"], summary: "Show l
 const composed = composeCommandProjection(product, legacyRoutes);
 const helpRequest = parseHelpMode(composed, ["echo", "--help=full"]);
 if (helpRequest !== undefined) void projectHelp(composed, helpRequest);
+const resultPresenter: NodeCliResultPresenter<typeof commands> = {
+  success: ({ result }) => textOutput(result.message),
+};
+const specialTerminalSurface: NodeCliSpecialTerminalSurface<typeof commands> = {
+  help: ({ mode }) => textOutput("special " + mode + "\\n"),
+  usageFailure: ({ code }) => textOutput(code),
+};
 const terminalAdapter: NodeCliTerminalAdapter<typeof commands> = {
   success: ({ result }) => textOutput(result.message),
   help: ({ mode, request, discovery }) => {
@@ -178,8 +190,10 @@ void executeNodeCli(product, ["echo", "typed package"], { legacyRoutes }).then((
     void message;
     void invalid;
   }
+  projectNodeCliExecution(execution, { resultPresenter, specialTerminalSurface });
   projectNodeCliExecution(execution, { terminalAdapter });
 });
+void runNodeCli(product, ["echo", "typed package"], { resultPresenter, specialTerminalSurface });
 void runNodeCli(product, ["echo", "typed package"], { legacyRoutes, terminalAdapter });
 const invocation = projectInvocation(product, "example.echo", { message: "typed package", format: "full" });
 if (invocation.state !== "ready") throw new Error("packed invocation must be ready");
@@ -208,6 +222,21 @@ void validId;
 // @ts-expect-error IDs are inferred from the declarations in the packed types.
 const invalidId: Id = "example.unknown";
 void invalidId;
+const groups = defineGroups({ tools: { route: ["tools"], summary: "Tools." } });
+const toolCommands = defineCommands({
+  "tools.echo": { route: ["tools", "echo"], summary: "Echo.", input: {}, result: z.object({}) },
+});
+const treeProduct = compileProduct({
+  name: "fixture-cli",
+  commands: toolCommands,
+  handlers: bindHandlers(toolCommands)({ "tools.echo": () => ({}) }),
+  groups,
+});
+const packedTree: CommandTreeRootNode<typeof groups, typeof toolCommands> = treeProduct.tree;
+const packedGroup = packedTree.children[0];
+if (packedGroup?.kind === "group") packedGroup.id satisfies GroupId<typeof groups>;
+// @ts-expect-error Packed compiled trees are immutable.
+packedTree.children.push(packedTree.children[0]);
 const paths = definePaths({
   app: {
     root: {
@@ -300,14 +329,17 @@ void packedTapProjection.failures;
     `import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import * as z from "zod";
 import * as api from "@yohn-jp/cli-canon";
 import * as node from "@yohn-jp/cli-canon/node";
 import packageMetadata from "./package.json" with { type: "json" };
 import { certifyScenarios, projectNodeTestTap } from "@yohn-jp/cli-canon/testing";
 import { createCertificationScenario } from "./fixture-scenario.mjs";
+import { certifyComposition } from "./composition-certification.mjs";
 
 assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
 assert.equal("projectNodeTestTap" in api, false, "testing helpers must stay outside the runtime root entrypoint");
+await certifyComposition();
 await certifyScenarios(
   [createCertificationScenario(packageMetadata, ["packed"])],
   [{ id: "packed", context: { api, node } }],
@@ -387,6 +419,39 @@ api.writeCliOutcome(output, {
   writeStderr: (text) => writes.push(["stderr", text]),
 });
 assert.deepEqual(writes, [["stdout", expectedJson]]);
+const runtimeCommands = api.defineCommands({
+  "packed.echo": {
+    route: ["packed", "echo"],
+    summary: "Echo a packed value.",
+    input: { value: api.positional(z.coerce.number().int()) },
+    result: z.object({ value: z.number() }),
+  },
+});
+const runtimeProduct = api.compileProduct({
+  name: "fixture-cli",
+  commands: runtimeCommands,
+  groups: api.defineGroups({ packed: { route: ["packed"], summary: "Packed commands." } }),
+  handlers: api.bindHandlers(runtimeCommands)({ "packed.echo": ({ value }) => ({ value }) }),
+});
+const packedRuntime = await api.executeCanonicalCommand(runtimeProduct, { route: ["packed", "echo"], input: { value: "7" } });
+assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed", "echo", "7"]), {
+  status: "success",
+  commandId: packedRuntime.commandId,
+  result: packedRuntime.result,
+});
+assert.deepEqual(await node.runNodeCli(runtimeProduct, ["packed", "echo", "7"], {
+  resultPresenter: { success: ({ result }) => api.textOutput(String(result.value)) },
+}), { exitCode: 0, stdout: "7", stderr: "" });
+assert.deepEqual(await node.runNodeCli(runtimeProduct, ["packed", "echo", "--help"], {
+  specialTerminalSurface: { help: () => api.textOutput("special help\\n") },
+}), { exitCode: 0, stdout: "special help\\n", stderr: "" });
+assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed"]), {
+  status: "failure",
+  failureKind: "usage",
+  usageFailure: { code: "no-command" },
+  usage: ["fixture-cli", "packed", "<command>"],
+});
+assert.equal((await node.executeNodeCli(runtimeProduct, ["packed", "echo", "x"])).failureKind, "validation");
 const nonFinite = api.jsonOutput({ value: Number.NaN });
 assert.equal(nonFinite.status, "failure");
 assert.equal(nonFinite.failureKind, "serialization");
@@ -405,6 +470,34 @@ const packedSkill = api.projectSkill(packedSkillProduct, "setup");
 assert.equal(packedSkill.intent, "Use the existing readiness result.");
 assert.equal(packedSkill.steps[0].skillId, "details");
 assert.deepEqual(JSON.parse(api.renderSkillJson(packedSkill)), packedSkill);
+const treeCommands = api.defineCommands({
+  "tools.echo": { route: ["tools", "echo"], summary: "Echo.", input: {}, result: z.object({}) },
+});
+const packedTreeProduct = api.compileProduct({
+  name: "fixture-cli",
+  commands: treeCommands,
+  handlers: { "tools.echo": () => ({}) },
+  groups: api.defineGroups({ tools: { route: ["tools"], summary: "Tools." } }),
+});
+const [packedGroup] = packedTreeProduct.tree.children;
+assert.equal(packedTreeProduct.tree.kind, "root");
+assert.equal(packedGroup.kind, "group");
+assert.equal(packedGroup.id, "tools");
+assert.equal(packedGroup.children[0].kind, "command");
+assert.equal(packedTreeProduct.commands[0].definition, packedGroup.children[0].definition);
+assert.ok(Object.isFrozen(packedTreeProduct.tree) && Object.isFrozen(packedGroup.children));
+assert.throws(
+  () => api.compileProduct({
+    name: "fixture-cli",
+    commands: treeCommands,
+    handlers: { "tools.echo": () => ({}) },
+    groups: { tools: { route: ["tools", "echo"], summary: "Tools." } },
+  }),
+  (error) => error instanceof api.CanonConstructionError
+    && error.issues[0]?.code === "AMBIGUOUS_ROUTE_OWNERSHIP"
+    && error.issues[0]?.groupId === "tools"
+    && error.issues[0]?.commandId === "tools.echo",
+);
 const paths = api.compilePaths(api.definePaths({
   app: {
     root: {

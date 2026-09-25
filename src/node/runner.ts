@@ -1,6 +1,6 @@
 import { Command, CommanderError, Option } from "commander";
 import type { CompiledCommand, CompiledField, CompiledProduct } from "../command/compiler.js";
-import type { CommandCatalog, CommandId, CommandResultOutput, FieldDefinition } from "../command/model.js";
+import type { CommandCatalog, CommandId, CommandResultOutput } from "../command/model.js";
 import {
   composeCommandProjection,
   projectDiscovery,
@@ -8,16 +8,28 @@ import {
   type LegacyRouteDescriptor,
 } from "../projection/discovery.js";
 import {
-  parseHelpMode,
   projectHelp,
+  projectHelpDocument,
+  resolveHelpTarget,
   type HelpOutputMode,
+  type HelpProjectionProduct,
   type HelpRequest,
+  type HelpTarget,
   type ParsedHelpMode,
 } from "../projection/help.js";
+import { renderUsageFailure } from "../presentation/index.js";
 import type { DomainErrorAdapter } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
 import { cliFailure, jsonOutput, textOutput, toCliResult } from "../output/policy.js";
+import { composeCommandSources, projectComposedCommandTree } from "../composition/compiler.js";
+import { executeCanonicalArgv, executeComposedArgv } from "../runtime/execution.js";
+import type {
+  CanonicalArgvBackend,
+  CanonicalArgvParse,
+  CanonicalExecutionOutcome,
+  ExecutableDelegatedCommandSource,
+} from "../runtime/model.js";
 
 export type { CliFailureKind, CliResult } from "../output/model.js";
 
@@ -62,32 +74,77 @@ export type NodeCliFailure =
       readonly status: "failure";
       readonly failureKind: "usage";
       readonly usageFailure: StructuredUsageFailure;
+      /** Usage tokens projected from the canonical help document for this failure target. */
+      readonly usage: readonly string[];
     }
   | {
       readonly status: "failure";
-      readonly failureKind: "validation" | "handler-result" | "handler-error";
+      /** Only `handler-error` carries product errors eligible for domain-error mapping. */
+      readonly failureKind: "validation" | "handler-result" | "handler-error" | "unexpected";
       readonly error: unknown;
     };
 
+/** A route resolved to a delegated owner; the delegated executor owns its terminal result. */
+export interface NodeCliDelegated {
+  readonly status: "delegated";
+  readonly sourceId: string;
+  readonly commandId: string;
+  readonly result: CliResult;
+}
+
 export type NodeCliExecution<Catalog extends CommandCatalog = CommandCatalog> =
-  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliFailure;
+  NodeCliSuccess<Catalog> | NodeCliHelp | NodeCliFailure | NodeCliDelegated;
+
+/** A delegated command source whose one executor boundary returns its own terminal result. */
+export type NodeDelegatedCommandSource = ExecutableDelegatedCommandSource<string, CliResult>;
 
 export interface ExecuteNodeCliOptions {
   readonly helpFormat?: HelpOutputMode | "text";
+  /**
+   * @deprecated Declare these routes in a delegated command source and pass it
+   * through `delegatedSources`; help and discovery then use the resolved tree.
+   */
   readonly legacyRoutes?: readonly LegacyRouteDescriptor[];
+  /**
+   * Delegated sources composed with the product's canonical source before execution.
+   * Each argv resolves to exactly one owner; no failure dispatches to another source.
+   */
+  readonly delegatedSources?: readonly NodeDelegatedCommandSource[];
 }
 
-/** A terminal projection is returned as a Canon output outcome, never written by the handler. */
-export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = CommandCatalog> {
+/** Product-owned presentation of the validated command result. */
+export interface NodeCliResultPresenter<Catalog extends CommandCatalog = CommandCatalog> {
   readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
-  /** Render consumer-specific terminal help from Canon-resolved help metadata. */
+}
+
+/** Explicit opt-out for products that own a special terminal surface. */
+export interface NodeCliSpecialTerminalSurface<Catalog extends CommandCatalog = CommandCatalog> {
+  /** Replace standard help only when the product explicitly opts into a special surface. */
   readonly help?: (execution: NodeCliHelp) => CliOutcome;
+  /** Replace standard usage presentation only for an explicit special surface. */
+  readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
+}
+
+/**
+ * @deprecated Use NodeCliResultPresenter for product result presentation and
+ * NodeCliSpecialTerminalSurface only for an explicit special-surface opt-out.
+ * Standard help and usage callbacks on this compatibility type are ignored.
+ */
+export interface NodeCliTerminalAdapter<Catalog extends CommandCatalog = CommandCatalog> {
+  /** @deprecated Use NodeCliResultPresenter.success. */
+  readonly success?: (execution: NodeCliSuccess<Catalog>) => CliOutcome;
+  /** @deprecated Standard help is Canon-owned; use specialTerminalSurface.help only for a special surface. */
+  readonly help?: (execution: NodeCliHelp) => CliOutcome;
+  /** @deprecated Standard usage presentation is Canon-owned; use specialTerminalSurface.usageFailure only for a special surface. */
   readonly usageFailure?: (failure: StructuredUsageFailure) => CliOutcome;
 }
 
 export interface ProjectNodeCliExecutionOptions<DomainError = never, Catalog extends CommandCatalog = CommandCatalog> {
   readonly maxOutputBytes?: number;
   readonly domainErrorAdapter?: DomainErrorAdapter<DomainError>;
+  readonly resultPresenter?: NodeCliResultPresenter<Catalog>;
+  readonly specialTerminalSurface?: NodeCliSpecialTerminalSurface<Catalog>;
+  /** @deprecated Use resultPresenter and specialTerminalSurface. */
   readonly terminalAdapter?: NodeCliTerminalAdapter<Catalog>;
 }
 
@@ -148,55 +205,6 @@ function makeOption(field: CompiledField, enforceRequired = true): Option {
   return result;
 }
 
-function fieldDefinition(command: CompiledCommand, key: string): FieldDefinition {
-  const field = command.definition.input[key];
-  if (field === undefined) throw new Error(`compiled field ${command.id}.${key} has no declaration`);
-  return field;
-}
-
-async function decodeInput(
-  command: CompiledCommand,
-  raw: Readonly<Record<string, unknown>>,
-): Promise<Readonly<Record<string, unknown>>> {
-  const decoded: Record<string, unknown> = {};
-  for (const field of command.fields) {
-    const definition = fieldDefinition(command, field.key);
-    const value = raw[field.key];
-    if (definition.kind === "flag") {
-      decoded[field.key] = value === true;
-      continue;
-    }
-    if (definition.kind === "raw-args") {
-      decoded[field.key] = Array.isArray(value) ? value : [];
-      continue;
-    }
-    if (definition.kind === "option" && definition.repeatable) {
-      const values = Array.isArray(value) ? value : [];
-      const parsed: unknown[] = [];
-      for (const item of values) {
-        if (item === true && definition.valueArity === "optional") parsed.push(undefined);
-        else parsed.push(await definition.schema.parseAsync(item));
-      }
-      decoded[field.key] = parsed;
-      continue;
-    }
-    if (definition.kind === "positional" && value === undefined && !definition.required) {
-      decoded[field.key] = undefined;
-      continue;
-    }
-    if (definition.kind === "option" && value === true && definition.valueArity === "optional") {
-      decoded[field.key] = undefined;
-      continue;
-    }
-    if (value === undefined && definition.kind === "option" && !definition.required) {
-      decoded[field.key] = undefined;
-      continue;
-    }
-    decoded[field.key] = await definition.schema.parseAsync(value);
-  }
-  return decoded;
-}
-
 function addInputSyntax(command: Command, compiled: CompiledCommand): void {
   for (const field of compiled.fields) {
     if (field.kind === "positional") {
@@ -206,22 +214,6 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
     else command.addOption(makeOption(field, field.placement !== "anywhere"));
   }
   command.allowExcessArguments(false);
-}
-
-interface RouteNode {
-  command: Command;
-  readonly children: Map<string, RouteNode>;
-}
-
-function childNode(parent: RouteNode, segment: string): RouteNode {
-  const existing = parent.children.get(segment);
-  if (existing !== undefined) return existing;
-  const command = parent.command.command(segment);
-  command.helpOption(false);
-  command.addHelpCommand(false);
-  const node = { command, children: new Map<string, RouteNode>() };
-  parent.children.set(segment, node);
-  return node;
 }
 
 function addAnywhereOptions<const Catalog extends CommandCatalog>(
@@ -285,26 +277,148 @@ function nodeCliHelp(product: DiscoveryProjectionProduct, parsed: ParsedHelpMode
   };
 }
 
-function usageFailure(failure: StructuredUsageFailure, maxOutputBytes: number | undefined): CliOutcome {
-  const message =
-    failure.code === "extra-positional-argument"
-      ? "error: too many arguments\n"
-      : failure.code === "unknown-option"
-        ? "error: unknown option\n"
-        : failure.code === "missing-option-value"
-          ? "error: option value missing\n"
-          : failure.code === "missing-required-option"
-            ? `error: required option '${failure.option ?? "unknown"}' not specified\n`
-            : failure.code === "missing-positional-argument"
-              ? "error: required argument missing\n"
-              : failure.code === "unknown-command"
-                ? "error: unknown command\n"
-                : failure.code === "invalid-help-mode"
-                  ? `Unknown help mode: ${failure.value ?? ""}\n`
-                  : failure.code === "no-command"
-                    ? "No command selected.\n"
-                    : "error: invalid command arguments\n";
-  return failureResult("usage", message, 2, maxOutputBytes);
+function usageFailure(
+  failure: StructuredUsageFailure,
+  usage: readonly string[],
+  maxOutputBytes: number | undefined,
+): CliOutcome {
+  return failureResult("usage", renderUsageFailure(failure, usage), 2, maxOutputBytes);
+}
+
+function silentCommand(name: string): Command {
+  const command = new Command(name);
+  command.helpOption(false);
+  command.addHelpCommand(false);
+  command.exitOverride();
+  command.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  return command;
+}
+
+function parseWith<Value extends object>(
+  command: Command,
+  argv: readonly string[],
+  read: () => Value,
+  commandId?: string,
+): CanonicalArgvParse<Value, StructuredUsageFailure> {
+  try {
+    command.parse([...argv], { from: "user" });
+  } catch (error) {
+    if (error instanceof CommanderError)
+      return { status: "failure", failure: classifyCommanderError(error, commandId) };
+    throw error;
+  }
+  return { status: "parsed", ...read() };
+}
+
+type CommanderOptions = Readonly<Record<string, unknown>>;
+
+/** Collects undecoded Commander tokens for canonical fields; decoding belongs to the semantic runtime. */
+function commandInput(
+  compiled: CompiledCommand,
+  command: Command,
+  rootOptions: CommanderOptions,
+): Readonly<Record<string, unknown>> {
+  const positionals = command.processedArgs;
+  const localOptions = command.opts<Record<string, unknown>>();
+  const input: Record<string, unknown> = {};
+  let positionalIndex = 0;
+  for (const field of compiled.fields) {
+    if (field.kind === "positional") input[field.key] = positionals[positionalIndex++];
+    else if (field.kind === "raw-args") input[field.key] = positionals[positionalIndex] ?? [];
+    else {
+      const key = commanderKey(field);
+      const local = localOptions[key];
+      const rootValue = rootOptions[key];
+      if (field.kind === "option" && field.repeatable === true) {
+        input[field.key] = [
+          ...(Array.isArray(rootValue) ? rootValue : rootValue === undefined ? [] : [rootValue]),
+          ...(Array.isArray(local) ? local : local === undefined ? [] : [local]),
+        ];
+      } else if (field.kind === "flag") {
+        input[field.key] = local === true || rootValue === true;
+      } else {
+        input[field.key] = local ?? rootValue;
+      }
+    }
+  }
+  return input;
+}
+
+/** Commander as an argv grammar backend only: it never selects commands, detects help, or decodes values. */
+function commanderBackend<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+): CanonicalArgvBackend<StructuredUsageFailure, CommanderOptions> {
+  const compiledById = new Map<string, CompiledCommand>(product.commands.map((command) => [command.id, command]));
+  return {
+    parseLeading(scope, argv) {
+      const command = silentCommand(product.name);
+      if (scope.kind === "root") addAnywhereOptions(command, product);
+      let operands: readonly string[] = [];
+      command
+        .passThroughOptions()
+        .argument("[operands...]")
+        .action((values: string[]) => {
+          operands = values;
+        });
+      return parseWith(command, argv, () => ({ operands, state: command.opts<Record<string, unknown>>() }));
+    },
+    parseCommand(node, argv, rootOptions) {
+      const compiled = compiledById.get(node.id);
+      if (compiled === undefined) throw new Error(`${node.id}: resolved command has no compiled grammar`);
+      const command = silentCommand(product.name);
+      addInputSyntax(command, compiled);
+      command.action(() => {});
+      return parseWith(command, argv, () => ({ input: commandInput(compiled, command, rootOptions) }), compiled.id);
+    },
+  };
+}
+
+/** Projects failure usage from the canonical help target already selected by runtime classification. */
+function usageForFailure(
+  product: HelpProjectionProduct,
+  failure: StructuredUsageFailure & { readonly route?: readonly string[] },
+): readonly string[] {
+  let target: HelpTarget | undefined;
+  if (failure.commandId !== undefined) {
+    const command = product.commands.find((candidate) => candidate.id === failure.commandId);
+    if (command !== undefined) target = { kind: "command", id: command.id, route: command.route };
+  }
+  if (target === undefined && failure.route !== undefined) {
+    for (let length = failure.route.length; length >= 0; length -= 1) {
+      target = resolveHelpTarget(product, failure.route.slice(0, length));
+      if (target !== undefined) break;
+    }
+  }
+  const document =
+    projectHelpDocument(product, target ?? { kind: "root" }) ?? projectHelpDocument(product, { kind: "root" });
+  if (document === undefined) throw new Error("Canonical root help document is unavailable");
+  return document.usage;
+}
+
+/** Adapts a semantic runtime outcome to the Node execution contract without re-resolving or re-decoding. */
+function nodeCliExecution<const Catalog extends CommandCatalog>(
+  outcome: CanonicalExecutionOutcome<Catalog>,
+  product: HelpProjectionProduct,
+): NodeCliExecution<Catalog> {
+  if (outcome.status === "success") {
+    return { status: "success", commandId: outcome.commandId, result: outcome.result } as NodeCliSuccess<Catalog>;
+  }
+  if (outcome.failureKind === "usage") {
+    const { code, commandId, option, value } = outcome.usageFailure;
+    const usageFailure = {
+      code,
+      ...(commandId === undefined ? {} : { commandId }),
+      ...(option === undefined ? {} : { option }),
+      ...(value === undefined ? {} : { value }),
+    };
+    return {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure,
+      usage: usageForFailure(product, { ...outcome.usageFailure, ...usageFailure }),
+    };
+  }
+  return { status: "failure", failureKind: outcome.failureKind, error: outcome.error };
 }
 
 export async function executeNodeCli<const Catalog extends CommandCatalog>(
@@ -312,131 +426,78 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
   argv: readonly string[],
   options: ExecuteNodeCliOptions = {},
 ): Promise<NodeCliExecution<Catalog>> {
-  const projection = composeCommandProjection(product, options.legacyRoutes ?? []);
-  const parsedHelp = parseHelpMode(projection, argv, options.helpFormat);
-  if (parsedHelp !== undefined) {
-    if (parsedHelp.invalidMode !== undefined) {
-      return {
-        status: "failure",
-        failureKind: "usage",
-        usageFailure: { code: "invalid-help-mode", value: parsedHelp.invalidMode },
-      };
-    }
-    return nodeCliHelp(projection, parsedHelp);
+  if (options.delegatedSources !== undefined) return executeComposedNodeCli(product, argv, options);
+  const projection =
+    options.legacyRoutes === undefined
+      ? projectComposedCommandTree(composeCommandSources([{ kind: "canonical", id: product.name, product }]), {
+          name: product.name,
+          ...(product.description === undefined ? {} : { description: product.description }),
+          ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
+        })
+      : composeCommandProjection(product, options.legacyRoutes);
+  const outcome = await executeCanonicalArgv(product, {
+    argv,
+    backend: commanderBackend(product),
+    help: projection,
+    ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
+  });
+  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
+    return {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: outcome.grammarFailure,
+      usage: usageForFailure(projection, outcome.grammarFailure),
+    };
   }
+  return nodeCliExecution(outcome, projection);
+}
 
-  let invocation: Promise<NodeCliExecution<Catalog>> | undefined;
-  const program = new Command(product.name);
-  program.helpOption(false);
-  program.addHelpCommand(false);
-  program.exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  program.enablePositionalOptions();
-  addAnywhereOptions(program, product);
-  const root: RouteNode = { command: program, children: new Map() };
-
-  for (const compiled of product.commands) {
-    let node = root;
-    for (const segment of compiled.route) node = childNode(node, segment);
-    node.command.description(compiled.summary);
-    addInputSyntax(node.command, compiled);
-    node.command.action(async (...actionArgs: unknown[]) => {
-      invocation = (async () => {
-        try {
-          const command = actionArgs.at(-1) as Command;
-          const positionals = command.processedArgs;
-          const localOptions = command.opts<Record<string, unknown>>();
-          const rootOptions = program.opts<Record<string, unknown>>();
-          const raw: Record<string, unknown> = {};
-          let positionalIndex = 0;
-          for (const field of compiled.fields) {
-            if (field.kind === "positional") raw[field.key] = positionals[positionalIndex++];
-            else if (field.kind === "raw-args") raw[field.key] = positionals[positionalIndex] ?? [];
-            else {
-              const key = commanderKey(field);
-              const local = localOptions[key];
-              const rootValue = rootOptions[key];
-              if (field.kind === "option" && field.repeatable === true) {
-                raw[field.key] = [
-                  ...(Array.isArray(rootValue) ? rootValue : rootValue === undefined ? [] : [rootValue]),
-                  ...(Array.isArray(local) ? local : local === undefined ? [] : [local]),
-                ];
-              } else if (field.kind === "flag") {
-                raw[field.key] = local === true || rootValue === true;
-              } else {
-                raw[field.key] = local ?? rootValue;
-              }
-            }
-          }
-
-          const missingRequiredOption = compiled.fields.find((field) => {
-            if (field.kind !== "option" || field.required !== true) return false;
-            const value = raw[field.key];
-            return field.repeatable === true ? !Array.isArray(value) || value.length === 0 : value === undefined;
-          });
-          if (missingRequiredOption !== undefined) {
-            return {
-              status: "failure",
-              failureKind: "usage",
-              usageFailure: {
-                code: "missing-required-option",
-                commandId: compiled.id,
-                ...(missingRequiredOption.flag === undefined ? {} : { option: missingRequiredOption.flag }),
-              },
-            };
-          }
-
-          let decoded: Readonly<Record<string, unknown>>;
-          try {
-            decoded = await decodeInput(compiled, raw);
-          } catch (error) {
-            return { status: "failure", failureKind: "validation", error };
-          }
-
-          const handler = product.handlers[compiled.id as keyof Catalog] as (
-            input: Readonly<Record<string, unknown>>,
-          ) => unknown;
-          let rawResult: unknown;
-          try {
-            rawResult = await handler(decoded);
-          } catch (error) {
-            return { status: "failure", failureKind: "handler-error", error };
-          }
-          let result;
-          try {
-            result = await compiled.definition.result.parseAsync(rawResult);
-          } catch (error) {
-            return { status: "failure", failureKind: "handler-result", error };
-          }
-          return { status: "success", commandId: compiled.id, result };
-        } catch (error) {
-          return { status: "failure", failureKind: "handler-error", error };
-        }
-      })();
-      await invocation;
-    });
+/**
+ * Composes the product's canonical source with delegated sources, resolves the owner
+ * from the composed tree, and invokes exactly that owner's executor.
+ */
+async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+  argv: readonly string[],
+  options: ExecuteNodeCliOptions,
+): Promise<NodeCliExecution<Catalog>> {
+  const sources = [{ kind: "canonical", id: product.name, product }, ...(options.delegatedSources ?? [])] as const;
+  const tree = composeCommandSources(sources);
+  const resolvedProjection = projectComposedCommandTree(tree, {
+    name: product.name,
+    ...(product.description === undefined ? {} : { description: product.description }),
+    ...(product.packageMetadata === undefined ? {} : { packageMetadata: product.packageMetadata }),
+  });
+  const projection =
+    options.legacyRoutes === undefined
+      ? resolvedProjection
+      : composeCommandProjection(resolvedProjection, options.legacyRoutes);
+  const outcome = await executeComposedArgv(
+    { tree, sources },
+    {
+      argv,
+      backend: commanderBackend(product),
+      help: projection,
+      ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
+    },
+  );
+  if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
+  if (outcome.status === "delegated") {
+    return { status: "delegated", sourceId: outcome.sourceId, commandId: outcome.commandId, result: outcome.result };
   }
-
-  try {
-    await program.parseAsync(["node", product.name, ...argv]);
-  } catch (error) {
-    if (error instanceof CommanderError) {
-      if (error.code === "commander.helpDisplayed") {
-        const rootHelp = parseHelpMode(projection, ["--help"], options.helpFormat);
-        if (rootHelp !== undefined) return nodeCliHelp(projection, rootHelp);
-      }
-      return { status: "failure", failureKind: "usage", usageFailure: classifyCommanderError(error) };
-    }
-    return { status: "failure", failureKind: "handler-error", error };
+  if (outcome.status === "failure" && outcome.failureKind === "grammar") {
+    return {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: outcome.grammarFailure,
+      usage: usageForFailure(projection, outcome.grammarFailure),
+    };
   }
-
-  return invocation === undefined
-    ? {
-        status: "failure",
-        failureKind: "usage",
-        usageFailure: { code: "no-command", parserCode: "canon.noCommandSelected" },
-      }
-    : await invocation;
+  if (outcome.status === "failure" && outcome.failureKind === "delegated-error") {
+    return { status: "failure", failureKind: "handler-error", error: outcome.error };
+  }
+  return nodeCliExecution(outcome as CanonicalExecutionOutcome<Catalog>, projection);
 }
 
 export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(
@@ -444,15 +505,17 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
   options: ProjectNodeCliExecutionOptions<DomainError, Catalog> = {},
 ): CliResult {
   const maxOutputBytes = options.maxOutputBytes;
+  if (execution.status === "delegated") return execution.result;
   if (execution.status === "success") {
     const outcome =
+      options.resultPresenter?.success?.(execution) ??
       options.terminalAdapter?.success?.(execution) ??
       jsonOutput(execution.result, outputPolicyOptions(maxOutputBytes));
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
   if (execution.status === "help") {
     const outcome =
-      options.terminalAdapter?.help?.(execution) ??
+      options.specialTerminalSurface?.help?.(execution) ??
       (typeof execution.projection === "string"
         ? textOutput(execution.projection, outputPolicyOptions(maxOutputBytes))
         : jsonOutput(execution.projection, outputPolicyOptions(maxOutputBytes)));
@@ -461,8 +524,8 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
 
   if (execution.failureKind === "usage") {
     const outcome =
-      options.terminalAdapter?.usageFailure?.(execution.usageFailure) ??
-      usageFailure(execution.usageFailure, maxOutputBytes);
+      options.specialTerminalSurface?.usageFailure?.(execution.usageFailure) ??
+      usageFailure(execution.usageFailure, execution.usage, maxOutputBytes);
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
   if (execution.failureKind === "validation") {
@@ -473,6 +536,11 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
   if (execution.failureKind === "handler-result") {
     return toCliResult(
       failureResult("handler-result", `INVALID_HANDLER_RESULT: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
+    );
+  }
+  if (execution.failureKind === "unexpected") {
+    return toCliResult(
+      failureResult("unexpected", `UNEXPECTED: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
     );
   }
 

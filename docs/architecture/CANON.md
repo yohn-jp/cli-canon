@@ -193,6 +193,29 @@ if (command === "bar") ...
 
 when the same command set already exists in Canon.
 
+### 6.1 Route groups and command tree
+
+CLI structure has one explicit vocabulary of node kinds: `root`, `group`, and `command`.
+
+- `root` is the product itself. It has no route and is not executable.
+- `group` is a non-executable route group declared with `defineGroups`. A `GroupDefinition` carries a route, a summary, and optional description, examples, and visibility. It declares no input, result, or handler.
+- `command` is an executable leaf that references exactly one `CommandDefinition` by its command ID.
+
+Group IDs are inferred from the `defineGroups` declaration keys, as command IDs are from `defineCommands`. Groups are first-class declarations rather than projection-time inference from shared route prefixes. Command grammar is still authored once in `CommandDefinition`; tree nodes reference command declarations and never copy them into a second command model. No projection-specific tree becomes an authority.
+
+Authority boundary: the consumer product owns product/domain content, including the product description plus group and command IDs, route tokens, summaries, descriptions, and examples. CLI Canon owns the standard CLI structure vocabulary, the runtime, and presentation derived from it. Product and group metadata are generic presentation content, not product logic.
+
+### 6.2 Canonical help document
+
+Help has one semantic authority: the help document projected by `projectHelpDocument` from the resolved command tree and compiled command fields. Text help and JSON help consume this document; neither rebuilds route structure nor carries independent route or flag authority. Canonical-only products use their compiled tree; products with delegated sources use the result of `composeCommandSources` through `projectComposedCommandTree`. The projection reads the resolved tree and never executes a source.
+
+- A help target is explicit: `root`, a declared `group`, or a `command`. An undeclared shared route prefix is not a target and has no inferred summary; commands under it are listed from their nearest declared ancestor with their remaining route segments.
+- The document carries the resolved target, derived usage tokens, target summary/description, arguments, options, children, examples, and the command leaves of the target subtree. The optional product description is the root target summary and therefore appears in standard root help while remaining consumer-authored content.
+- Usage is derived from the route and declared field grammar; it is never a maintained string.
+- Group content comes from the group declaration, never from a descendant command.
+- `summary` (`--help`) contains usage, target summary, and child summaries. `full` (`--help=full`) adds target description, arguments, options, child descriptions, and examples. `json` (`--help=json`) is the discovery projection of the same document's command leaves.
+- `LegacyRouteDescriptor`, `composeCommandProjection`, and the Node `legacyRoutes` option are deprecated compatibility APIs for 0.1.7 consumers. Migrate each route to a `DelegatedCommandSource`, compose it with the canonical source using `composeCommandSources`, and pass the executable source through Node's `delegatedSources`. Use `projectComposedCommandTree` when projecting help directly. This keeps route ownership, group membership, help, and discovery on the resolved tree without consumer-side route extraction or help splicing.
+
 ## 7. Input Canon
 
 CLI syntax and value semantics are related but distinct.
@@ -287,6 +310,12 @@ An output operation owns exit code, stdout, stderr, and failure classification t
 Machine-readable output must remain structurally valid. Never truncate JSON bytes to meet a budget.
 
 Do not silently convert a failed projection into exit code 0.
+
+### 11.1 Presentation ownership
+
+CLI Canon owns standard help, usage failures, validation failures, handler-result failures, and unexpected framework failures. A product may present a typed command result through `NodeCliResultPresenter` and map typed domain errors through `DomainErrorAdapter`.
+
+`NodeCliSpecialTerminalSurface` is an explicit opt-out for a product-owned terminal surface. It is not a general hook for restyling standard help. The 0.1.7 `NodeCliTerminalAdapter` remains importable during migration; move result presentation to `NodeCliResultPresenter`, and move only a genuine special-surface implementation to `NodeCliSpecialTerminalSurface`. Its legacy help and usage callbacks are ignored, so the default path retains one Canon-owned renderer.
 
 ## 12. Path Canon direction
 

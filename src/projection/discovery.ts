@@ -2,6 +2,7 @@ import type { ProjectionCommandSource } from "./source.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
 import type { OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
 import type { CompiledField } from "../command/compiler.js";
+import type { HelpTreeSource } from "./help-model.js";
 import { CanonConstructionError, type CanonConstructionIssue } from "../command/errors.js";
 
 export interface CommandDiscovery {
@@ -27,6 +28,7 @@ export interface CommandDiscovery {
 
 export interface ProductDiscovery {
   readonly name: string;
+  readonly description?: string;
   readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly CommandDiscovery[];
 }
@@ -38,11 +40,21 @@ export interface DiscoveryRequest {
 
 export interface DiscoveryProjectionProduct {
   readonly name: string;
+  readonly description?: string;
   readonly packageMetadata?: ProductPackageIdentity;
   readonly commands: readonly ProjectionCommandSource[];
+  /** Resolved command tree; the help model reads route and group membership from it. */
+  readonly tree?: HelpTreeSource;
 }
 
-/** Bounded presentation metadata for one route that is still owned by a consumer. */
+/**
+ * Bounded presentation metadata for one route that is still owned by a consumer.
+ *
+ * @deprecated Declare the route in a `DelegatedCommandSource`, compose it with
+ * `composeCommandSources`, and project the result with
+ * `projectComposedCommandTree`. Node consumers should pass the executable
+ * delegated source through `delegatedSources`.
+ */
 export interface LegacyRouteDescriptor {
   readonly id: string;
   readonly route: readonly [string, ...string[]];
@@ -52,7 +64,11 @@ export interface LegacyRouteDescriptor {
   readonly fields: readonly CompiledField[];
 }
 
-export interface ComposedCommandProjection extends DiscoveryProjectionProduct {}
+/** Structural help/discovery input projected from a resolved command tree. */
+export interface ResolvedCommandProjection extends DiscoveryProjectionProduct {}
+
+/** @deprecated Use `ResolvedCommandProjection` from `projectComposedCommandTree`. */
+export interface ComposedCommandProjection extends ResolvedCommandProjection {}
 
 function projectPackageMetadata(packageMetadata: ProductPackageIdentity): ProductPackageIdentity {
   return {
@@ -83,24 +99,21 @@ function compareCommands(
           : 0;
 }
 
-export function projectDiscovery(
+/**
+ * Projects machine-readable discovery for a command set. JSON help passes the
+ * command leaves of its canonical help document; discovery passes a route scope.
+ */
+export function projectCommandDiscovery(
   product: DiscoveryProjectionProduct,
-  request: DiscoveryRequest = {},
+  commands: readonly ProjectionCommandSource[],
 ): ProductDiscovery {
-  const commands = product.commands
-    .filter(
-      (command) =>
-        request.route === undefined ||
-        (request.route.length <= command.route.length &&
-          request.route.every((segment, index) => command.route[index] === segment)),
-    )
-    .sort(compareCommands);
   return {
     name: product.name,
+    ...(product.description === undefined ? {} : { description: product.description }),
     ...(product.packageMetadata === undefined
       ? {}
       : { packageMetadata: projectPackageMetadata(product.packageMetadata) }),
-    commands: commands.map((command) => ({
+    commands: [...commands].sort(compareCommands).map((command) => ({
       id: command.id,
       route: [...command.route],
       summary: command.summary,
@@ -114,15 +127,39 @@ export function projectDiscovery(
   };
 }
 
+export function projectDiscovery(
+  product: DiscoveryProjectionProduct,
+  request: DiscoveryRequest = {},
+): ProductDiscovery {
+  return projectCommandDiscovery(
+    product,
+    product.commands.filter(
+      (command) =>
+        request.route === undefined ||
+        (request.route.length <= command.route.length &&
+          request.route.every((segment, index) => command.route[index] === segment)),
+    ),
+  );
+}
+
+function treeGroupRoutes(node: HelpTreeSource): readonly (readonly string[])[] {
+  return node.children.flatMap((child) => (child.kind === "group" ? [child.route, ...treeGroupRoutes(child)] : []));
+}
+
 function routesOverlap(left: readonly string[], right: readonly string[]): boolean {
   const sharedLength = Math.min(left.length, right.length);
   return left.slice(0, sharedLength).every((segment, index) => segment === right[index]);
 }
 
 /**
- * Combines Canon-owned routes with bounded descriptors for routes still owned
- * by a consumer. Shared parent groups are allowed; one route cannot own or
- * overlap another route's leaf.
+ * Compatibility projection for the 0.1.7 legacy-route migration surface.
+ *
+ * @deprecated `composeCommandProjection` is a 0.1.7 compatibility API.
+ * Declare consumer-owned routes in a `DelegatedCommandSource`,
+ * compose all sources with `composeCommandSources`, and pass the resolved tree
+ * to `projectComposedCommandTree`. Node consumers should pass executable
+ * delegated sources through `delegatedSources` instead of describing routes
+ * separately for help.
  */
 export function composeCommandProjection(
   product: DiscoveryProjectionProduct,
@@ -180,10 +217,23 @@ export function composeCommandProjection(
     }
   }
 
+  const groupRoutes = product.tree === undefined ? [] : treeGroupRoutes(product.tree);
+  for (const route of legacyRoutes) {
+    if (groupRoutes.some((groupRoute) => groupRoute.join("\u0000") === route.route.join("\u0000"))) {
+      issues.push({
+        code: "AMBIGUOUS_ROUTE_OWNERSHIP",
+        commandId: route.id,
+        message: `command ${route.id} claims declared group route ${route.route.join(" ")}`,
+      });
+    }
+  }
+
   if (issues.length > 0) throw new CanonConstructionError(issues);
 
   return Object.freeze({
     name: product.name,
+    ...(product.description === undefined ? {} : { description: product.description }),
+    ...(product.tree === undefined ? {} : { tree: product.tree }),
     ...(product.packageMetadata === undefined
       ? {}
       : { packageMetadata: Object.freeze(projectPackageMetadata(product.packageMetadata)) }),

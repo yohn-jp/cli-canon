@@ -26,6 +26,8 @@ export async function runCertificationScenario(api, node, packageMetadata, input
   const success = await node.runNodeCli(product, ["echo", input.message, input.suffix, `--format=${input.format}`]);
   const validation = await node.runNodeCli(product, ["echo", ""]);
   const fullHelp = await node.runNodeCli(product, ["echo", "--help=full"]);
+  const defaultHelp = await node.runNodeCli(product, ["echo", "--help"]);
+  const usageFailure = await node.runNodeCli(product, ["echo", input.message, "--unknown"]);
   const jsonHelp = await node.runNodeCli(product, ["--help=json"]);
 
   return {
@@ -41,6 +43,8 @@ export async function runCertificationScenario(api, node, packageMetadata, input
       includesDescription: fullHelp.stdout.includes("Optional suffix."),
       includesExample: fullHelp.stdout.includes("fixture-cli echo hello --format=full"),
     },
+    defaultHelp,
+    usageFailure,
     discovery: api.projectDiscovery(product),
     jsonHelp: {
       exitCode: jsonHelp.exitCode,

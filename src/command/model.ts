@@ -70,6 +70,23 @@ export interface CommandDefinition<
 
 export type CommandCatalog = Readonly<Record<string, CommandDefinition>>;
 
+/**
+ * A non-executable route group. Groups carry generic presentation content only;
+ * they declare no input, result, or handler and never become commands.
+ */
+export interface GroupDefinition {
+  readonly route: readonly [string, ...string[]];
+  readonly summary: string;
+  readonly description?: string;
+  readonly visibility?: CommandVisibility;
+  readonly examples?: readonly string[];
+  readonly input?: never;
+  readonly result?: never;
+  readonly orderedOptionGroups?: never;
+}
+
+export type GroupCatalog = Readonly<Record<string, GroupDefinition>>;
+
 export type FieldOutput<Field extends FieldDefinition> =
   Field extends PositionalField<infer Schema, infer Required>
     ? Required extends true
@@ -98,3 +115,4 @@ export type CommandInput<Command extends CommandDefinition> = {
 export type CommandResultInput<Command extends CommandDefinition> = z.input<Command["result"]>;
 export type CommandResultOutput<Command extends CommandDefinition> = z.output<Command["result"]>;
 export type CommandId<Catalog extends CommandCatalog> = Extract<keyof Catalog, string>;
+export type GroupId<Catalog extends GroupCatalog> = Extract<keyof Catalog, string>;
