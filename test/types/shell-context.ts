@@ -123,7 +123,7 @@ void delegatedRequest;
 
 // The semantic runtime outcome carries the mode and a typed version request.
 declare const backend: Parameters<typeof executeCanonicalArgv>[1]["backend"];
-void executeCanonicalArgv(product, { argv: ["--version"], backend, help: product, packageMetadata }).then(
+void executeCanonicalArgv(product, { argv: ["--version"], backend, help: product }).then(
   (outcome: CanonicalArgvOutcome<typeof commands>) => {
     outcome.presentation satisfies PresentationMode;
     if (outcome.status === "version") outcome.packageMetadata.version satisfies string;
@@ -132,3 +132,12 @@ void executeCanonicalArgv(product, { argv: ["--version"], backend, help: product
     }
   },
 );
+
+// Version identity belongs to the compiled product, not the argv request.
+// @ts-expect-error CanonicalArgvRequest cannot override package identity.
+void executeCanonicalArgv(product, {
+  argv: ["--version"],
+  backend,
+  help: product,
+  packageMetadata: { name: "@example/override", version: "9.9.9" },
+});
