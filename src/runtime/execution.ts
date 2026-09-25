@@ -451,8 +451,7 @@ export async function executeComposedArgv<
   request: CanonicalArgvRequest<Failure, RootState>,
 ): Promise<ComposedArgvOutcome<Failure, Result, SourceId>> {
   const canonicalSources = product.sources.filter((source) => source.kind === "canonical");
-  const packageMetadata =
-    canonicalSources.length === 1 ? canonicalSources[0]?.product.packageMetadata : undefined;
+  const packageMetadata = canonicalSources.length === 1 ? canonicalSources[0]?.product.packageMetadata : undefined;
   const resolution = resolveArgvRequest<ComposedCommandNode<SourceId>, Failure, RootState>(
     product.tree.root.children,
     request,
