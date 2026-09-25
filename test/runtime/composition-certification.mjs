@@ -83,8 +83,14 @@ export async function certifyComposition() {
       ["assets.sync", "external"],
     ],
   );
-  const projection = projectComposedCommandTree(tree, { name: "atelier", description: product.description });
-  assert.equal(projectHelpDocument(projection, { kind: "root" })?.summary, "Manage the asset workspace.");
+  const projection = projectComposedCommandTree(tree, {
+    name: "atelier",
+    description: product.description,
+  });
+  assert.equal(
+    projectHelpDocument(projection, { kind: "root" })?.summary,
+    "Manage the asset workspace.",
+  );
   assert.deepEqual(
     projectHelpDocument(projection, { kind: "group", id: "assets", route: ["assets"] })?.children.map(({ id }) => id),
     ["assets.inspect", "assets.sync"],
