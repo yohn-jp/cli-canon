@@ -6,14 +6,17 @@ import {
   bindHandlers,
   compileProduct,
   composeCommandProjection,
+  composeCommandSources,
   defineCommands,
   defineGroups,
   executeCanonicalArgv,
   executeCanonicalCommand,
+  executeComposedArgv,
   flag,
   option,
   parseHelpMode,
   projectHelp,
+  projectComposedCommandTree,
   projectDiscovery,
   positional,
   renderHelp,
@@ -563,4 +566,276 @@ test("framework failures outside handlers project as unexpected without domain-e
   assert.equal(terminal.failureKind, "unexpected");
   assert.equal(terminal.exitCode, 1);
   assert.equal(domainErrorChecks, 0);
+});
+
+/** Canon-owned and delegated routes, including siblings under the shared `architecture` group. */
+function composedFixture({ executorThrows = false } = {}) {
+  const handlerCalls = [];
+  const commands = defineCommands({
+    "architecture.example": {
+      route: ["architecture", "example"],
+      summary: "Show an architecture example.",
+      input: {
+        format: option("--format", z.enum(["full", "json"]), { valueArity: "optional" }),
+      },
+      result: z.object({ rendered: z.string() }),
+    },
+  });
+  const handlers = bindHandlers(commands)({
+    "architecture.example": ({ format }) => {
+      handlerCalls.push(format);
+      if (format === "json") throw { code: "EXAMPLE_UNAVAILABLE" };
+      return { rendered: format === "full" ? "full example" : "summary example" };
+    },
+  });
+  const groups = defineGroups({ architecture: { route: ["architecture"], summary: "Browse architecture examples." } });
+  const product = compileProduct({ name: "fixture", commands, handlers, groups });
+  const executorCalls = [];
+  const delegated = {
+    kind: "delegated",
+    id: "external",
+    groups: [{ id: "external.auth", route: ["auth"], summary: "Manage sign-in." }],
+    commands: [
+      {
+        id: "external.architecture.zones",
+        route: ["architecture", "zones"],
+        summary: "List architecture zones.",
+        fields: [],
+      },
+      {
+        id: "external.auth.login",
+        route: ["auth", "login"],
+        summary: "Sign in to a service.",
+        fields: [
+          {
+            key: "account",
+            kind: "option",
+            flag: "--account",
+            aliases: [],
+            repeatable: false,
+            required: true,
+            valueArity: "required",
+            optionLookingValuePolicy: "consume",
+            placement: "after-route",
+          },
+        ],
+      },
+    ],
+    execute: (request) => {
+      executorCalls.push(request);
+      if (executorThrows) throw { code: "DELEGATED_FAILED" };
+      return { exitCode: 0, stdout: `${request.commandId} ${request.argv.join(" ")}\n`, stderr: "" };
+    },
+  };
+  return { product, delegated, handlerCalls, executorCalls };
+}
+
+test("composed dispatch executes Canon-owned routes through the semantic runtime only", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  const execution = await executeNodeCli(product, ["architecture", "example", "--format=full"], {
+    delegatedSources: [delegated],
+  });
+  assert.deepEqual(execution, {
+    status: "success",
+    commandId: "architecture.example",
+    result: { rendered: "full example" },
+  });
+  assert.deepEqual(handlerCalls, ["full"]);
+  assert.deepEqual(executorCalls, [], "canonical owners never cross the delegated executor boundary");
+});
+
+test("composed dispatch invokes only the declared delegated executor for delegated routes", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  const result = await runNodeCli(product, ["auth", "login", "--account", "team"], { delegatedSources: [delegated] });
+  assert.deepEqual(result, { exitCode: 0, stdout: "external.auth.login --account team\n", stderr: "" });
+  assert.deepEqual(executorCalls, [
+    { sourceId: "external", commandId: "external.auth.login", route: ["auth", "login"], argv: ["--account", "team"] },
+  ]);
+  assert.deepEqual(handlerCalls, []);
+});
+
+test("shared-group canonical and delegated siblings resolve to their own owners", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  const options = { delegatedSources: [delegated] };
+
+  const canonical = await executeNodeCli(product, ["architecture", "example"], options);
+  assert.equal(canonical.status, "success");
+  assert.equal(canonical.commandId, "architecture.example");
+
+  const external = await executeNodeCli(product, ["architecture", "zones", "--all"], options);
+  assert.deepEqual(external, {
+    status: "delegated",
+    sourceId: "external",
+    commandId: "external.architecture.zones",
+    result: { exitCode: 0, stdout: "external.architecture.zones --all\n", stderr: "" },
+  });
+  assert.deepEqual(handlerCalls, [undefined]);
+  assert.deepEqual(
+    executorCalls.map(({ commandId, route }) => [commandId, route]),
+    [["external.architecture.zones", ["architecture", "zones"]]],
+  );
+
+  const group = await runNodeCli(product, ["architecture", "--help"], options);
+  assert.equal(group.exitCode, 0);
+  assert.match(group.stdout, /example\tShow an architecture example\./);
+  assert.match(group.stdout, /zones\tList architecture zones\./);
+  assert.equal(executorCalls.length, 1);
+});
+
+test("unknown-command is reported only after resolution fails across all composed sources", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  for (const [argv, route] of [
+    [["missing"], ["missing"]],
+    [
+      ["architecture", "missing"],
+      ["architecture", "missing"],
+    ],
+    [
+      ["auth", "logout"],
+      ["auth", "logout"],
+    ],
+  ]) {
+    const execution = await executeNodeCli(product, argv, { delegatedSources: [delegated] });
+    assert.deepEqual(
+      execution,
+      { status: "failure", failureKind: "usage", usageFailure: { code: "unknown-command" } },
+      argv.join(" "),
+    );
+    const outcome = await executeComposedArgv(
+      { tree: composeCommandSources([{ kind: "canonical", id: "fixture", product }, delegated]), sources: [delegated] },
+      { argv, backend: recordingBackend().backend, help: product },
+    );
+    assert.deepEqual(outcome, {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: { code: "unknown-command", route },
+    });
+  }
+  for (const argv of [["architecture"], ["auth"], []]) {
+    const execution = await executeNodeCli(product, argv, { delegatedSources: [delegated] });
+    assert.deepEqual(execution.usageFailure, { code: "no-command" }, argv.join(" "));
+  }
+  assert.deepEqual(handlerCalls, []);
+  assert.deepEqual(executorCalls, []);
+});
+
+test("no canonical usage, validation, or domain failure falls back to a delegated source", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  const options = { delegatedSources: [delegated] };
+
+  const domain = await executeNodeCli(product, ["architecture", "example", "--format=json"], options);
+  assert.equal(domain.status, "failure");
+  assert.equal(domain.failureKind, "handler-error");
+  assert.deepEqual(projectNodeCliExecution(domain, { domainErrorAdapter }), {
+    exitCode: 7,
+    stdout: "",
+    stderr: "EXAMPLE_UNAVAILABLE: example is unavailable\n",
+    failureKind: "domain",
+  });
+
+  const validation = await executeNodeCli(product, ["architecture", "example", "--format=xml"], options);
+  assert.equal(validation.status, "failure");
+  assert.equal(validation.failureKind, "validation");
+
+  const grammar = await executeNodeCli(product, ["architecture", "example", "--unknown"], options);
+  assert.equal(grammar.status, "failure");
+  assert.equal(grammar.usageFailure.code, "unknown-option");
+
+  const unbound = await executeNodeCli({ ...product, handlers: {} }, ["architecture", "example"], options);
+  assert.equal(unbound.status, "failure");
+  assert.equal(unbound.failureKind, "unexpected");
+
+  assert.deepEqual(handlerCalls, ["json"]);
+  assert.deepEqual(executorCalls, [], "canonical failures never dispatch to another source");
+});
+
+test("delegated executor failures stay with the delegated owner", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture({ executorThrows: true });
+  const execution = await executeNodeCli(product, ["architecture", "zones"], { delegatedSources: [delegated] });
+  assert.deepEqual(execution, { status: "failure", failureKind: "handler-error", error: { code: "DELEGATED_FAILED" } });
+  assert.equal(executorCalls.length, 1);
+  assert.deepEqual(handlerCalls, [], "delegated failures never dispatch to the canonical runtime");
+});
+
+test("composed help and discovery resolve structurally without invoking the delegated executor", async () => {
+  const { product, delegated, handlerCalls, executorCalls } = composedFixture();
+  const options = { delegatedSources: [delegated] };
+
+  const root = await runNodeCli(product, ["--help"], options);
+  assert.equal(root.exitCode, 0);
+  assert.match(root.stdout, /architecture\tBrowse architecture examples\./);
+  assert.match(root.stdout, /auth\tManage sign-in\./);
+
+  const leaf = await executeNodeCli(product, ["auth", "login", "--account", "team", "--help=full"], options);
+  assert.equal(leaf.status, "help");
+  assert.deepEqual(leaf.request, { kind: "command", commandId: "external.auth.login", mode: "full" });
+  assert.match(leaf.projection, /--account <account>/);
+
+  const zones = await executeNodeCli(product, ["architecture", "zones", "-h"], options);
+  assert.equal(zones.status, "help");
+  assert.deepEqual(
+    zones.discovery.commands.map(({ id }) => id),
+    ["external.architecture.zones"],
+  );
+
+  const json = await runNodeCli(product, ["--help=json"], options);
+  assert.deepEqual(
+    JSON.parse(json.stdout).commands.map(({ id }) => id),
+    ["architecture.example", "external.architecture.zones", "external.auth.login"],
+  );
+
+  assert.deepEqual(executorCalls, [], "help/discovery never execute a delegated runtime");
+  assert.deepEqual(handlerCalls, []);
+});
+
+test("composed argv runtime selects the owner before parsing command grammar", async () => {
+  const { product, delegated, executorCalls } = composedFixture();
+  const sources = [{ kind: "canonical", id: "fixture", product }, delegated];
+  const tree = composeCommandSources(sources);
+  const help = projectComposedCommandTree(tree, { name: "fixture" });
+
+  const recording = recordingBackend();
+  const delegatedOutcome = await executeComposedArgv(
+    { tree, sources },
+    { argv: ["architecture", "zones", "--all"], backend: recording.backend, help },
+  );
+  assert.deepEqual(delegatedOutcome, {
+    status: "delegated",
+    sourceId: "external",
+    commandId: "external.architecture.zones",
+    route: ["architecture", "zones"],
+    result: { exitCode: 0, stdout: "external.architecture.zones --all\n", stderr: "" },
+  });
+  assert.equal(
+    recording.calls.some(([kind]) => kind === "command"),
+    false,
+    "delegated routes are never parsed by the canonical grammar backend",
+  );
+
+  const canonicalRecording = recordingBackend(() => ({ format: "full" }));
+  const canonicalOutcome = await executeComposedArgv(
+    { tree, sources },
+    { argv: ["architecture", "example"], backend: canonicalRecording.backend, help },
+  );
+  assert.deepEqual(canonicalOutcome, {
+    status: "success",
+    commandId: "architecture.example",
+    route: ["architecture", "example"],
+    result: { rendered: "full example" },
+  });
+  assert.deepEqual(canonicalRecording.calls.at(-1), ["command", "architecture.example", [], "root-state"]);
+
+  const helpOutcome = await executeComposedArgv(
+    { tree, sources },
+    { argv: ["architecture", "zones", "--help"], backend: recordingBackend().backend, help },
+  );
+  assert.equal(helpOutcome.status, "help");
+
+  const missingOwner = await executeComposedArgv(
+    { tree, sources: [sources[0]] },
+    { argv: ["architecture", "zones"], backend: recordingBackend().backend, help },
+  );
+  assert.equal(missingOwner.status, "failure");
+  assert.equal(missingOwner.failureKind, "unexpected");
+  assert.equal(executorCalls.length, 1);
 });

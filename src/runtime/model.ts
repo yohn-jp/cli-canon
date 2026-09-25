@@ -1,6 +1,7 @@
 import type { HandlerMap } from "../command/handlers.js";
 import type { CommandCatalog, CommandId, CommandResultOutput, GroupCatalog } from "../command/model.js";
 import type { CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
+import type { CanonicalCommandSource, ComposedCommandTree, DelegatedCommandSource } from "../composition/model.js";
 import type { HelpOutputMode, HelpProjectionProduct, ParsedHelpMode } from "../projection/help.js";
 
 /**
@@ -133,6 +134,59 @@ export type CanonicalArgvOutcome<Catalog extends CommandCatalog = CommandCatalog
   | CanonicalExecutionOutcome<Catalog>
   | { readonly status: "help"; readonly help: ParsedHelpMode }
   | { readonly status: "failure"; readonly failureKind: "grammar"; readonly grammarFailure: Failure };
+
+/**
+ * The one executor boundary a delegated source crosses for a route it owns.
+ *
+ * Canon has already resolved the owner and route from the composed tree; `argv`
+ * is the remaining argv following the resolved route, verbatim. The delegated
+ * source owns its grammar and domain semantics for that argv.
+ */
+export interface DelegatedCommandRequest<SourceId extends string = string> {
+  readonly sourceId: SourceId;
+  readonly commandId: string;
+  readonly route: readonly [string, ...string[]];
+  readonly argv: readonly string[];
+}
+
+export type DelegatedCommandExecutor<Result = unknown> = (request: DelegatedCommandRequest) => Result | Promise<Result>;
+
+/** A delegated source together with its explicit executor boundary. Composition reads only its structure. */
+export interface ExecutableDelegatedCommandSource<
+  SourceId extends string = string,
+  Result = unknown,
+> extends DelegatedCommandSource<SourceId> {
+  readonly execute: DelegatedCommandExecutor<Result>;
+}
+
+export type ExecutableCommandSource<SourceId extends string = string, Result = unknown> =
+  CanonicalCommandSource<SourceId> | ExecutableDelegatedCommandSource<SourceId, Result>;
+
+/** A composed tree and the sources whose owners it resolves; owners are looked up by source ID. */
+export interface ComposedRuntimeProduct<SourceId extends string = string, Result = unknown> {
+  readonly tree: ComposedCommandTree<SourceId>;
+  readonly sources: readonly ExecutableCommandSource<SourceId, Result>[];
+}
+
+/** Semantic outcome of one argv invocation dispatched to exactly one composed owner. */
+export type ComposedArgvOutcome<Failure = unknown, Result = unknown, SourceId extends string = string> =
+  | CanonicalArgvOutcome<CommandCatalog, Failure>
+  | {
+      /** The delegated executor returned; its result is owned by the delegated source. */
+      readonly status: "delegated";
+      readonly sourceId: SourceId;
+      readonly commandId: string;
+      readonly route: readonly [string, ...string[]];
+      readonly result: Result;
+    }
+  | {
+      /** The delegated executor threw or rejected. No other source is tried. */
+      readonly status: "failure";
+      readonly failureKind: "delegated-error";
+      readonly sourceId: SourceId;
+      readonly commandId: string;
+      readonly error: unknown;
+    };
 
 export class CanonicalRequestError extends Error {
   readonly code = "INVALID_CANONICAL_REQUEST" as const;

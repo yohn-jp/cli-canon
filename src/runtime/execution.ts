@@ -1,6 +1,7 @@
 import type { CommandCatalog, CommandDefinition, CommandId, FieldDefinition } from "../command/model.js";
 import type { CommandTreeChildNode, CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
-import { parseHelpMode } from "../projection/help.js";
+import type { ComposedCommandNode } from "../composition/model.js";
+import { parseHelpMode, type ParsedHelpMode } from "../projection/help.js";
 import {
   CanonicalRequestError,
   type CanonicalArgvOutcome,
@@ -9,6 +10,8 @@ import {
   type CanonicalExecutionOutcome,
   type CanonicalRuntimeProduct,
   type CanonicalUsageFailure,
+  type ComposedArgvOutcome,
+  type ComposedRuntimeProduct,
 } from "./model.js";
 
 type RouteResolution =
@@ -218,10 +221,15 @@ async function executeCommandNode<const Catalog extends CommandCatalog>(
   }) as CanonicalExecutionOutcome<Catalog>;
 }
 
-type ArgvRouteResolution<Failure, RootState> =
+/** Structural route node shared by the compiled canonical tree and the composed source tree. */
+type ArgvTreeNode =
+  | { readonly kind: "command"; readonly route: readonly string[] }
+  | { readonly kind: "group"; readonly route: readonly string[]; readonly children: readonly ArgvTreeNode[] };
+
+type ArgvRouteResolution<Node, Failure, RootState> =
   | {
       readonly kind: "command";
-      readonly node: CommandTreeCommandNode;
+      readonly node: Node;
       readonly route: readonly string[];
       readonly tail: readonly string[];
       readonly root: RootState;
@@ -230,20 +238,21 @@ type ArgvRouteResolution<Failure, RootState> =
   | { readonly kind: "grammar"; readonly failure: Failure };
 
 /**
- * Resolves the command route from argv operands against the compiled canonical tree.
+ * Resolves the command route from argv operands against a route tree: the compiled
+ * canonical tree or the composed source tree.
  *
  * The backend parses the options preceding each route operand; the runtime alone matches
  * operands to route segments and classifies unknown and incomplete routes.
  */
-function resolveArgvRoute<Failure, RootState>(
-  tree: CommandTreeRootNode,
+function resolveArgvRoute<Node extends ArgvTreeNode & { readonly kind: "command" }, Failure, RootState>(
+  children: readonly ArgvTreeNode[],
   request: CanonicalArgvRequest<Failure, RootState>,
-): ArgvRouteResolution<Failure, RootState> {
+): ArgvRouteResolution<Node, Failure, RootState> {
   const leading = request.backend.parseLeading({ kind: "root" }, request.argv);
   if (leading.status === "failure") return { kind: "grammar", failure: leading.failure };
   const root = leading.state;
   let operands = leading.operands;
-  let candidates: readonly CommandTreeChildNode[] = tree.children;
+  let candidates: readonly ArgvTreeNode[] = children;
   const route: string[] = [];
   for (;;) {
     if (route.length > 0) {
@@ -264,7 +273,7 @@ function resolveArgvRoute<Failure, RootState>(
     }
     const exact = matches.find((child) => child.route.length === route.length);
     if (exact?.kind === "command") {
-      return { kind: "command", node: exact, route: Object.freeze(route), tail: operands, root };
+      return { kind: "command", node: exact as Node, route: Object.freeze(route), tail: operands, root };
     }
     candidates = exact?.kind === "group" ? exact.children : matches;
   }
@@ -281,36 +290,153 @@ export async function executeCanonicalArgv<const Catalog extends CommandCatalog,
   product: CanonicalRuntimeProduct<Catalog>,
   request: CanonicalArgvRequest<Failure, RootState>,
 ): Promise<CanonicalArgvOutcome<Catalog, Failure>> {
-  let resolution: ArgvRouteResolution<Failure, RootState>;
+  const resolution = resolveArgvRequest<CommandTreeCommandNode, Failure, RootState>(
+    (product.tree as unknown as CommandTreeRootNode).children,
+    request,
+  );
+  if (resolution.kind !== "command") return resolution.outcome;
+  return executeResolvedArgv(product, resolution.node, resolution, request);
+}
+
+type ArgvRequestResolution<Node, Failure, RootState> =
+  | Extract<ArgvRouteResolution<Node, Failure, RootState>, { readonly kind: "command" }>
+  | {
+      readonly kind: "outcome";
+      readonly outcome:
+        | { readonly status: "help"; readonly help: ParsedHelpMode }
+        | Extract<CanonicalArgvOutcome<CommandCatalog, Failure>, { readonly failureKind: "usage" | "grammar" }>
+        | { readonly status: "failure"; readonly failureKind: "unexpected"; readonly error: unknown };
+    };
+
+/** Resolves help intent, then the command route; nothing is parsed for a command or executed here. */
+function resolveArgvRequest<Node extends ArgvTreeNode & { readonly kind: "command" }, Failure, RootState>(
+  children: readonly ArgvTreeNode[],
+  request: CanonicalArgvRequest<Failure, RootState>,
+): ArgvRequestResolution<Node, Failure, RootState> {
+  let resolution: ArgvRouteResolution<Node, Failure, RootState>;
   try {
     const help = parseHelpMode(request.help, request.argv, request.helpFormat);
     if (help !== undefined) {
-      if (help.invalidMode === undefined) return { status: "help", help };
+      if (help.invalidMode === undefined) return { kind: "outcome", outcome: { status: "help", help } };
       return {
-        status: "failure",
-        failureKind: "usage",
-        usageFailure: { code: "invalid-help-mode", route: Object.freeze([]), value: help.invalidMode },
+        kind: "outcome",
+        outcome: {
+          status: "failure",
+          failureKind: "usage",
+          usageFailure: { code: "invalid-help-mode", route: Object.freeze([]), value: help.invalidMode },
+        },
       };
     }
-    resolution = resolveArgvRoute(product.tree as unknown as CommandTreeRootNode, request);
+    resolution = resolveArgvRoute<Node, Failure, RootState>(children, request);
   } catch (error) {
-    return { status: "failure", failureKind: "unexpected", error };
+    return { kind: "outcome", outcome: { status: "failure", failureKind: "unexpected", error } };
   }
   if (resolution.kind === "grammar") {
-    return { status: "failure", failureKind: "grammar", grammarFailure: resolution.failure };
+    return {
+      kind: "outcome",
+      outcome: { status: "failure", failureKind: "grammar", grammarFailure: resolution.failure },
+    };
   }
   if (resolution.kind === "usage") {
-    return { status: "failure", failureKind: "usage", usageFailure: resolution.usageFailure };
+    return {
+      kind: "outcome",
+      outcome: { status: "failure", failureKind: "usage", usageFailure: resolution.usageFailure },
+    };
   }
+  return resolution;
+}
 
+/** Parses the argv following a resolved canonical command and executes it without re-resolving its route. */
+async function executeResolvedArgv<const Catalog extends CommandCatalog, Failure, RootState>(
+  product: CanonicalRuntimeProduct<Catalog>,
+  node: CommandTreeCommandNode,
+  resolution: { readonly route: readonly string[]; readonly tail: readonly string[]; readonly root: RootState },
+  request: CanonicalArgvRequest<Failure, RootState>,
+): Promise<CanonicalArgvOutcome<Catalog, Failure>> {
   let parsed: ReturnType<CanonicalArgvRequest<Failure, RootState>["backend"]["parseCommand"]>;
   try {
-    parsed = request.backend.parseCommand(resolution.node, resolution.tail, resolution.root);
+    parsed = request.backend.parseCommand(node, resolution.tail, resolution.root);
   } catch (error) {
-    return { status: "failure", failureKind: "unexpected", commandId: resolution.node.id as CommandId<Catalog>, error };
+    return { status: "failure", failureKind: "unexpected", commandId: node.id as CommandId<Catalog>, error };
   }
   if (parsed.status === "failure") {
     return { status: "failure", failureKind: "grammar", grammarFailure: parsed.failure };
   }
-  return executeCommandNode(product, resolution.node, resolution.route, parsed.input);
+  return executeCommandNode(product, node, resolution.route, parsed.input);
+}
+
+function findCanonicalCommand(
+  children: readonly CommandTreeChildNode[],
+  id: string,
+): CommandTreeCommandNode | undefined {
+  for (const child of children) {
+    if (child.kind === "command") {
+      if (child.id === id) return child;
+      continue;
+    }
+    const found = findCanonicalCommand(child.children, id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Executes one argv invocation against a composed command tree.
+ *
+ * Help intent and the command route are resolved structurally against the composed
+ * tree before any executor runs; help never invokes a delegated executor. The resolved
+ * node's owner selects exactly one executor: canonical owners execute through the
+ * semantic runtime and delegated owners cross their one explicit executor boundary.
+ * `unknown-command` means no source owns the route. No outcome of the selected owner,
+ * including usage, validation, handler, or delegated failures, dispatches to another source.
+ */
+export async function executeComposedArgv<
+  Failure,
+  RootState = unknown,
+  Result = unknown,
+  SourceId extends string = string,
+>(
+  product: ComposedRuntimeProduct<SourceId, Result>,
+  request: CanonicalArgvRequest<Failure, RootState>,
+): Promise<ComposedArgvOutcome<Failure, Result, SourceId>> {
+  const resolution = resolveArgvRequest<ComposedCommandNode<SourceId>, Failure, RootState>(
+    product.tree.root.children,
+    request,
+  );
+  if (resolution.kind !== "command") return resolution.outcome;
+
+  const { node } = resolution;
+  const { kind, sourceId } = node.owner;
+  const source = product.sources.find((candidate) => candidate.id === sourceId && candidate.kind === kind);
+  if (source?.kind === "delegated") {
+    if (typeof source.execute !== "function") {
+      return {
+        status: "failure",
+        failureKind: "unexpected",
+        error: new CanonicalRequestError(`${node.id}: delegated source ${sourceId} declares no executor`),
+      };
+    }
+    let result: Result;
+    try {
+      result = await source.execute(
+        Object.freeze({ sourceId, commandId: node.id, route: node.route, argv: Object.freeze([...resolution.tail]) }),
+      );
+    } catch (error) {
+      return { status: "failure", failureKind: "delegated-error", sourceId, commandId: node.id, error };
+    }
+    return Object.freeze({ status: "delegated", sourceId, commandId: node.id, route: node.route, result });
+  }
+
+  const canonical =
+    source?.kind === "canonical"
+      ? findCanonicalCommand((source.product.tree as unknown as CommandTreeRootNode).children, node.id)
+      : undefined;
+  if (source === undefined || canonical === undefined) {
+    return {
+      status: "failure",
+      failureKind: "unexpected",
+      error: new CanonicalRequestError(`${node.id}: composed owner ${sourceId} has no matching ${kind} source`),
+    };
+  }
+  return executeResolvedArgv(source.product as CanonicalRuntimeProduct, canonical, resolution, request);
 }
