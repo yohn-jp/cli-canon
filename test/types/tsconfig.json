@@ -11,6 +11,7 @@
     "public-contract.ts",
     "invocation.ts",
     "command-tree.ts",
+    "runtime.ts",
     "../../src/**/*.ts"
   ]
 }
