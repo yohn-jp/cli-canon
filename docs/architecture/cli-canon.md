@@ -338,6 +338,8 @@ object keyの決定論的な順序と、意味を持つarray順序を区別す�
 
 MCP stdio、interactive terminal、子processのstreaming outputはこの単一JSON responseとは別のtransport契約である。Mottainaiのno-args server起動やprotocol stdoutをframeworkのhelp/diagnosticで汚染しない。[M4]
 
+標準shell(root no-args、Help、`--version`、`--json`によるmachine mode、framework failureのhuman/machine projection、stream、exit code)の正確な値は[CANON.md](./CANON.md) §11.2–§11.6で凍結する。presentation modeはshell境界で一度だけ解決し、result presenter、`DomainErrorAdapter`、delegated executorへ渡す。consumerはargvやCanonが描画したstdoutを再解析しない。mode切替はencodingだけを変え、streamとexit codeは変えない。special surfaceはprotocol/stdio、TUI・interactive、長時間のstreaming/server sessionに限定し、既存のHelp配置やJSON error形式を残す手段には使わない。
+
 ## 11. FixtureとPackage Canon
 
 ### 11.1 共通化するのはscenario形式とharness
@@ -416,11 +418,15 @@ Nawabariは既に強いliteral型をdonorとして使うが、順序付きgroup�
 
 Inariはcommand-owned applicabilityとSkill/domain参照を維持し、command-specific bindingへ狭める。動的なrepository governanceを固定schemaへ変換しない。認証・relay・providerの変更は含めない。
 
-Mottainaiは単一command familyずつ手書きUSAGE/parserを置き換える。no-args server、MCP stdio、task launchの既存分岐は契約として維持する。巨大なCLI全体の一括rewriteを最初のconsumerにしない。
+Mottainaiは単一command familyずつ手書きUSAGE/parserを置き換える。no-args server、MCP stdioはCANON.md §11.6を満たす範囲でledgerの`special-surface`として維持し、task launchの既存分岐はledgerで分類する。巨大なCLI全体の一括rewriteを最初のconsumerにしない。
 
 ### 13.3 二重authorityを残さない移行
 
-移行前のraw argv/出力/exit code/必要assetをcharacterization corpusとして固定する。移行後は同じcorpusを再利用し、framework由来の新しいexpectedで上書きしない。
+移行前のraw argv/出力/exit code/必要assetをcharacterization corpusとして固定する。このcorpusは証拠であり、自動的に移行後の目標出力にはならない。Canonが標準shellの規範authorityである。
+
+移行対象の各legacy挙動は、consumer repositoryの変更ledgerで`preserve-domain`、`converge-to-canon`、`transition-only`、`special-surface`のいずれか一つに分類する。定義と分類規則はCANON.md §17.1が規範である。`preserve-domain`と`special-surface`のexpectedは変えない。`converge-to-canon`のexpectedは同じ変更でCANON.md §11の出力へ書き換え、legacyの形をconsumer側で再構築しない。`transition-only`は除去条件を明記する。未分類の差分は移行を止める。framework更新時にexpected snapshotを自動承認しない規則は変わらない。
+
+採用後のcommand追加、任意option追加、Help内容の編集、domain resultの拡張は製品repository単独の変更であり、CLI Canonの変更やreleaseを要しない。
 
 部分移行ではcomposition rootが新旧の所有subtreeを明示的に分ける。同じrouteを両方へ登録しない。未移行範囲は適合済みと表示せず、移行済み範囲の古いparser/usage/projectionは削除する。互換性差分の承認が必要な場合は、共通化とは区別した変更として扱う。
 
