@@ -265,37 +265,72 @@ test("parser failures carry source classification and project to stable terminal
     },
     map: () => ({ exitCode: 9, stream: "stderr", output: "unexpected domain mapping\n" }),
   };
+  const commandUsage = "Usage: fixture render <file> --out <out>";
+  const rootUsage = "Usage: fixture <command>";
   const cases = [
-    [["render", "input.txt", "extra", "--out", "out.txt"], "extra-positional-argument", "commander.excessArguments"],
-    [["render", "input.txt", "--out", "out.txt", "--unknown"], "unknown-option", "commander.unknownOption"],
-    [["render", "input.txt", "--out"], "missing-option-value", "commander.optionMissingArgument"],
-    [["render", "input.txt"], "missing-required-option", "commander.missingMandatoryOptionValue"],
+    {
+      argv: ["render", "input.txt", "extra", "--out", "out.txt"],
+      code: "extra-positional-argument",
+      parserCode: "commander.excessArguments",
+      message: "too many arguments",
+      usage: commandUsage,
+    },
+    {
+      argv: ["render", "input.txt", "--out", "out.txt", "--unknown"],
+      code: "unknown-option",
+      parserCode: "commander.unknownOption",
+      message: "unknown option",
+      usage: commandUsage,
+    },
+    {
+      argv: ["render", "input.txt", "--out"],
+      code: "missing-option-value",
+      parserCode: "commander.optionMissingArgument",
+      message: "option value missing",
+      usage: commandUsage,
+    },
+    {
+      argv: ["render", "input.txt"],
+      code: "missing-required-option",
+      parserCode: "commander.missingMandatoryOptionValue",
+      message: "required option not specified",
+      usage: commandUsage,
+    },
+    {
+      argv: ["render", "--out", "out.txt"],
+      code: "missing-positional-argument",
+      parserCode: "commander.missingArgument",
+      message: "required argument missing",
+      usage: commandUsage,
+    },
+    { argv: ["missing"], code: "unknown-command", message: "unknown command", usage: rootUsage },
+    { argv: [], code: "no-command", message: "no command selected", usage: rootUsage },
+    {
+      argv: ["render", "--help=brief"],
+      code: "invalid-help-mode",
+      message: 'unknown help mode "brief"',
+      usage: rootUsage,
+    },
   ];
 
-  for (const [argv, code, parserCode] of cases) {
+  for (const { argv, code, parserCode, message, usage } of cases) {
     const execution = await executeNodeCli(product, argv);
     assert.equal(execution.status, "failure");
     assert.equal(execution.failureKind, "usage");
     assert.equal(execution.usageFailure.code, code);
-    assert.equal(execution.usageFailure.parserCode, parserCode);
-    const terminal = projectNodeCliExecution(execution, { domainErrorAdapter: domainAdapter });
-    assert.equal(terminal.exitCode, 2);
-    assert.equal(terminal.stdout, "");
-    assert.equal(terminal.failureKind, "usage");
-    assert.notEqual(terminal.stderr, "");
+    if (parserCode !== undefined) {
+      assert.equal(execution.usageFailure.parserCode, parserCode);
+      assert.equal(execution.usageFailure.commandId, "document.render");
+    }
+    assert.equal(`Usage: ${execution.usage.join(" ")}`, usage);
+    assert.deepEqual(projectNodeCliExecution(execution, { domainErrorAdapter: domainAdapter }), {
+      exitCode: 2,
+      stdout: "",
+      stderr: `error: ${message}\n\n${usage}\n`,
+      failureKind: "usage",
+    });
   }
   assert.equal(domainErrorChecks, 0, "usage failures never enter domain error mapping");
-
-  const invalidHelp = await executeNodeCli(product, ["render", "--help=brief"]);
-  assert.equal(invalidHelp.status, "failure");
-  assert.equal(invalidHelp.failureKind, "usage");
-  assert.equal(invalidHelp.usageFailure.code, "invalid-help-mode");
-  assert.deepEqual(projectNodeCliExecution(invalidHelp), {
-    exitCode: 2,
-    stdout: "",
-    stderr: "Unknown help mode: brief\n",
-    failureKind: "usage",
-  });
 });
 
 function runtimeFixture() {
@@ -372,6 +407,15 @@ test("Node execution delegates route resolution, required input, and decoding to
     status: "failure",
     failureKind: "usage",
     usageFailure: { code: "missing-required-option", commandId: "document.render", option: "--scope" },
+    usage: ["fixture", "document", "render", "<file>", "--count <count>", "--scope <scope>", "[--verbose]"],
+  });
+  assert.deepEqual(projectNodeCliExecution(missingAnywhere), {
+    exitCode: 2,
+    stdout: "",
+    stderr:
+      "error: required option '--scope' not specified\n\n" +
+      "Usage: fixture document render <file> --count <count> --scope <scope> [--verbose]\n",
+    failureKind: "usage",
   });
 });
 
@@ -486,34 +530,49 @@ test("structured usage corpus never inspects parser messages or enters domain-er
     [["document", "missing"], { code: "unknown-command" }],
     [
       ["document", "render", "a", "b", "--count", "1", "--scope", "x"],
-      { code: "extra-positional-argument", parserCode: "commander.excessArguments" },
+      { code: "extra-positional-argument", parserCode: "commander.excessArguments", commandId: "document.render" },
     ],
     [
       ["document", "render", "a", "--count", "1", "--scope", "x", "--nope"],
-      { code: "unknown-option", parserCode: "commander.unknownOption" },
+      { code: "unknown-option", parserCode: "commander.unknownOption", commandId: "document.render" },
     ],
     [
       ["document", "render", "a", "--scope", "x", "--count"],
-      { code: "missing-option-value", parserCode: "commander.optionMissingArgument" },
+      { code: "missing-option-value", parserCode: "commander.optionMissingArgument", commandId: "document.render" },
     ],
     [
       ["document", "render", "a", "--scope", "x"],
-      { code: "missing-required-option", parserCode: "commander.missingMandatoryOptionValue" },
+      {
+        code: "missing-required-option",
+        parserCode: "commander.missingMandatoryOptionValue",
+        commandId: "document.render",
+      },
     ],
     [
       ["document", "render", "--count", "1", "--scope", "x"],
-      { code: "missing-positional-argument", parserCode: "commander.missingArgument" },
+      { code: "missing-positional-argument", parserCode: "commander.missingArgument", commandId: "document.render" },
     ],
     [["document", "render", "--help=brief"], { code: "invalid-help-mode", value: "brief" }],
   ];
 
   for (const [argv, usageFailure] of cases) {
     const execution = await executeNodeCli(product, argv);
-    assert.deepEqual(execution, { status: "failure", failureKind: "usage", usageFailure }, argv.join(" "));
+    assert.equal(execution.status, "failure", argv.join(" "));
+    assert.equal(execution.failureKind, "usage", argv.join(" "));
+    assert.deepEqual(execution.usageFailure, usageFailure, argv.join(" "));
+    assert.ok(execution.usage.length > 0, argv.join(" "));
     const terminal = projectNodeCliExecution(execution, { domainErrorAdapter: domainAdapter });
     assert.equal(terminal.exitCode, 2, argv.join(" "));
     assert.equal(terminal.failureKind, "usage", argv.join(" "));
   }
+  const groupNoCommand = await executeNodeCli(product, ["document"]);
+  assert.deepEqual(groupNoCommand.usage, ["fixture", "document", "<command>"]);
+  assert.deepEqual(projectNodeCliExecution(groupNoCommand), {
+    exitCode: 2,
+    stdout: "",
+    stderr: "error: no command selected\n\nUsage: fixture document <command>\n",
+    failureKind: "usage",
+  });
   assert.equal(domainErrorChecks, 0, "usage failures never enter domain error mapping");
   assert.deepEqual(calls, []);
 });
@@ -684,21 +743,23 @@ test("shared-group canonical and delegated siblings resolve to their own owners"
 
 test("unknown-command is reported only after resolution fails across all composed sources", async () => {
   const { product, delegated, handlerCalls, executorCalls } = composedFixture();
-  for (const [argv, route] of [
-    [["missing"], ["missing"]],
+  for (const [argv, route, usage] of [
+    [["missing"], ["missing"], ["fixture", "<command>"]],
     [
       ["architecture", "missing"],
       ["architecture", "missing"],
+      ["fixture", "architecture", "<command>"],
     ],
     [
       ["auth", "logout"],
       ["auth", "logout"],
+      ["fixture", "auth", "<command>"],
     ],
   ]) {
     const execution = await executeNodeCli(product, argv, { delegatedSources: [delegated] });
     assert.deepEqual(
       execution,
-      { status: "failure", failureKind: "usage", usageFailure: { code: "unknown-command" } },
+      { status: "failure", failureKind: "usage", usageFailure: { code: "unknown-command" }, usage },
       argv.join(" "),
     );
     const outcome = await executeComposedArgv(
@@ -711,9 +772,14 @@ test("unknown-command is reported only after resolution fails across all compose
       usageFailure: { code: "unknown-command", route },
     });
   }
-  for (const argv of [["architecture"], ["auth"], []]) {
+  for (const [argv, usage] of [
+    [["architecture"], ["fixture", "architecture", "<command>"]],
+    [["auth"], ["fixture", "auth", "<command>"]],
+    [[], ["fixture", "<command>"]],
+  ]) {
     const execution = await executeNodeCli(product, argv, { delegatedSources: [delegated] });
     assert.deepEqual(execution.usageFailure, { code: "no-command" }, argv.join(" "));
+    assert.deepEqual(execution.usage, usage, argv.join(" "));
   }
   assert.deepEqual(handlerCalls, []);
   assert.deepEqual(executorCalls, []);

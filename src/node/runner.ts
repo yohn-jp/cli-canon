@@ -7,7 +7,17 @@ import {
   type DiscoveryProjectionProduct,
   type LegacyRouteDescriptor,
 } from "../projection/discovery.js";
-import { projectHelp, type HelpOutputMode, type HelpRequest, type ParsedHelpMode } from "../projection/help.js";
+import {
+  projectHelp,
+  projectHelpDocument,
+  resolveHelpTarget,
+  type HelpOutputMode,
+  type HelpProjectionProduct,
+  type HelpRequest,
+  type HelpTarget,
+  type ParsedHelpMode,
+} from "../projection/help.js";
+import { renderUsageFailure } from "../presentation/index.js";
 import type { DomainErrorAdapter } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductDiscovery } from "../projection/discovery.js";
@@ -64,6 +74,8 @@ export type NodeCliFailure =
       readonly status: "failure";
       readonly failureKind: "usage";
       readonly usageFailure: StructuredUsageFailure;
+      /** Usage tokens projected from the canonical help document for this failure target. */
+      readonly usage: readonly string[];
     }
   | {
       readonly status: "failure";
@@ -239,26 +251,12 @@ function nodeCliHelp(product: DiscoveryProjectionProduct, parsed: ParsedHelpMode
   };
 }
 
-function usageFailure(failure: StructuredUsageFailure, maxOutputBytes: number | undefined): CliOutcome {
-  const message =
-    failure.code === "extra-positional-argument"
-      ? "error: too many arguments\n"
-      : failure.code === "unknown-option"
-        ? "error: unknown option\n"
-        : failure.code === "missing-option-value"
-          ? "error: option value missing\n"
-          : failure.code === "missing-required-option"
-            ? `error: required option '${failure.option ?? "unknown"}' not specified\n`
-            : failure.code === "missing-positional-argument"
-              ? "error: required argument missing\n"
-              : failure.code === "unknown-command"
-                ? "error: unknown command\n"
-                : failure.code === "invalid-help-mode"
-                  ? `Unknown help mode: ${failure.value ?? ""}\n`
-                  : failure.code === "no-command"
-                    ? "No command selected.\n"
-                    : "error: invalid command arguments\n";
-  return failureResult("usage", message, 2, maxOutputBytes);
+function usageFailure(
+  failure: StructuredUsageFailure,
+  usage: readonly string[],
+  maxOutputBytes: number | undefined,
+): CliOutcome {
+  return failureResult("usage", renderUsageFailure(failure, usage), 2, maxOutputBytes);
 }
 
 function silentCommand(name: string): Command {
@@ -274,11 +272,13 @@ function parseWith<Value extends object>(
   command: Command,
   argv: readonly string[],
   read: () => Value,
+  commandId?: string,
 ): CanonicalArgvParse<Value, StructuredUsageFailure> {
   try {
     command.parse([...argv], { from: "user" });
   } catch (error) {
-    if (error instanceof CommanderError) return { status: "failure", failure: classifyCommanderError(error) };
+    if (error instanceof CommanderError)
+      return { status: "failure", failure: classifyCommanderError(error, commandId) };
     throw error;
   }
   return { status: "parsed", ...read() };
@@ -342,29 +342,54 @@ function commanderBackend<const Catalog extends CommandCatalog>(
       const command = silentCommand(product.name);
       addInputSyntax(command, compiled);
       command.action(() => {});
-      return parseWith(command, argv, () => ({ input: commandInput(compiled, command, rootOptions) }));
+      return parseWith(command, argv, () => ({ input: commandInput(compiled, command, rootOptions) }), compiled.id);
     },
   };
+}
+
+/** Projects failure usage from the canonical help target already selected by runtime classification. */
+function usageForFailure(
+  product: HelpProjectionProduct,
+  failure: StructuredUsageFailure & { readonly route?: readonly string[] },
+): readonly string[] {
+  let target: HelpTarget | undefined;
+  if (failure.commandId !== undefined) {
+    const command = product.commands.find((candidate) => candidate.id === failure.commandId);
+    if (command !== undefined) target = { kind: "command", id: command.id, route: command.route };
+  }
+  if (target === undefined && failure.route !== undefined) {
+    for (let length = failure.route.length; length >= 0; length -= 1) {
+      target = resolveHelpTarget(product, failure.route.slice(0, length));
+      if (target !== undefined) break;
+    }
+  }
+  const document =
+    projectHelpDocument(product, target ?? { kind: "root" }) ?? projectHelpDocument(product, { kind: "root" });
+  if (document === undefined) throw new Error("Canonical root help document is unavailable");
+  return document.usage;
 }
 
 /** Adapts a semantic runtime outcome to the Node execution contract without re-resolving or re-decoding. */
 function nodeCliExecution<const Catalog extends CommandCatalog>(
   outcome: CanonicalExecutionOutcome<Catalog>,
+  product: HelpProjectionProduct,
 ): NodeCliExecution<Catalog> {
   if (outcome.status === "success") {
     return { status: "success", commandId: outcome.commandId, result: outcome.result } as NodeCliSuccess<Catalog>;
   }
   if (outcome.failureKind === "usage") {
     const { code, commandId, option, value } = outcome.usageFailure;
+    const usageFailure = {
+      code,
+      ...(commandId === undefined ? {} : { commandId }),
+      ...(option === undefined ? {} : { option }),
+      ...(value === undefined ? {} : { value }),
+    };
     return {
       status: "failure",
       failureKind: "usage",
-      usageFailure: {
-        code,
-        ...(commandId === undefined ? {} : { commandId }),
-        ...(option === undefined ? {} : { option }),
-        ...(value === undefined ? {} : { value }),
-      },
+      usageFailure,
+      usage: usageForFailure(product, { ...outcome.usageFailure, ...usageFailure }),
     };
   }
   return { status: "failure", failureKind: outcome.failureKind, error: outcome.error };
@@ -385,9 +410,14 @@ export async function executeNodeCli<const Catalog extends CommandCatalog>(
   });
   if (outcome.status === "help") return nodeCliHelp(projection, outcome.help);
   if (outcome.status === "failure" && outcome.failureKind === "grammar") {
-    return { status: "failure", failureKind: "usage", usageFailure: outcome.grammarFailure };
+    return {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: outcome.grammarFailure,
+      usage: usageForFailure(projection, outcome.grammarFailure),
+    };
   }
-  return nodeCliExecution(outcome);
+  return nodeCliExecution(outcome, projection);
 }
 
 /**
@@ -422,12 +452,17 @@ async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
     return { status: "delegated", sourceId: outcome.sourceId, commandId: outcome.commandId, result: outcome.result };
   }
   if (outcome.status === "failure" && outcome.failureKind === "grammar") {
-    return { status: "failure", failureKind: "usage", usageFailure: outcome.grammarFailure };
+    return {
+      status: "failure",
+      failureKind: "usage",
+      usageFailure: outcome.grammarFailure,
+      usage: usageForFailure(projection, outcome.grammarFailure),
+    };
   }
   if (outcome.status === "failure" && outcome.failureKind === "delegated-error") {
     return { status: "failure", failureKind: "handler-error", error: outcome.error };
   }
-  return nodeCliExecution(outcome as CanonicalExecutionOutcome<Catalog>);
+  return nodeCliExecution(outcome as CanonicalExecutionOutcome<Catalog>, projection);
 }
 
 export function projectNodeCliExecution<DomainError = never, Catalog extends CommandCatalog = CommandCatalog>(
@@ -454,7 +489,7 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
   if (execution.failureKind === "usage") {
     const outcome =
       options.terminalAdapter?.usageFailure?.(execution.usageFailure) ??
-      usageFailure(execution.usageFailure, maxOutputBytes);
+      usageFailure(execution.usageFailure, execution.usage, maxOutputBytes);
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
   if (execution.failureKind === "validation") {
