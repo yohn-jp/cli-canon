@@ -100,7 +100,7 @@ function describe(node: CommandTreeNode<Groups, Commands>): string {
 void describe;
 
 // @ts-expect-error node kinds are a closed vocabulary.
-const invalidKind: CommandTreeNodeKind = "root";
+const invalidKind: CommandTreeNodeKind = "alias";
 void invalidKind;
 
 // @ts-expect-error command nodes reference declared command IDs only.
