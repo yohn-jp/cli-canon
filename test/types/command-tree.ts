@@ -103,18 +103,18 @@ void describe;
 const invalidKind: CommandTreeNodeKind = "alias";
 void invalidKind;
 
+// @ts-expect-error command nodes reference declared command IDs only.
 const invalidCommandLeaf: CommandTreeChildNode<Groups, Commands> = {
   kind: "command",
-  // @ts-expect-error command nodes reference declared command IDs only.
   id: "document",
   route: groups.document.route,
   definition: commands["document.render"],
 };
 void invalidCommandLeaf;
 
+// @ts-expect-error group nodes reference declared group IDs only.
 const invalidGroupNode: CommandTreeChildNode<Groups, Commands> = {
   kind: "group",
-  // @ts-expect-error group nodes reference declared group IDs only.
   id: "document.render",
   route: commands["document.render"].route,
   definition: groups.document,
@@ -161,7 +161,7 @@ const handlers = bindHandlers(commands)({ "document.render": ({ out }) => ({ wri
 const product = compileProduct({ name: "fixture", commands, handlers, groups });
 const tree: CommandTreeRootNode<Groups, Commands> = product.tree;
 void tree;
-const compatibleProduct: CompiledProduct = product;
+const compatibleProduct: CompiledProduct<Commands> = product;
 void compatibleProduct;
 for (const node of product.tree.children) {
   if (node.kind === "group") {

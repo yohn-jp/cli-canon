@@ -80,7 +80,7 @@ export interface CompiledProduct<
   Catalog extends CommandCatalog = CommandCatalog,
   Skills extends SkillCatalog<CommandId<Catalog>, SkillId<Skills>> = SkillCatalog<CommandId<Catalog>>,
   Paths extends PathCatalog<Extract<keyof Paths, string>> = PathCatalog,
-  Groups extends GroupCatalog = GroupCatalog,
+  Groups extends GroupCatalog = any,
 > {
   readonly name: string;
   readonly description?: string;
