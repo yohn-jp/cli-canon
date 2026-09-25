@@ -116,6 +116,8 @@ import {
   executeNodeCli,
   projectNodeCliExecution,
   runNodeCli,
+  type NodeCliResultPresenter,
+  type NodeCliSpecialTerminalSurface,
   type NodeCliTerminalAdapter,
   type StructuredUsageErrorCode,
 } from "@yohn-jp/cli-canon/node";
@@ -160,6 +162,13 @@ const legacyRoutes = [{ id: "legacy.status", route: ["status"], summary: "Show l
 const composed = composeCommandProjection(product, legacyRoutes);
 const helpRequest = parseHelpMode(composed, ["echo", "--help=full"]);
 if (helpRequest !== undefined) void projectHelp(composed, helpRequest);
+const resultPresenter: NodeCliResultPresenter<typeof commands> = {
+  success: ({ result }) => textOutput(result.message),
+};
+const specialTerminalSurface: NodeCliSpecialTerminalSurface<typeof commands> = {
+  help: ({ mode }) => textOutput("special " + mode + "\\n"),
+  usageFailure: ({ code }) => textOutput(code),
+};
 const terminalAdapter: NodeCliTerminalAdapter<typeof commands> = {
   success: ({ result }) => textOutput(result.message),
   help: ({ mode, request, discovery }) => {
@@ -181,8 +190,10 @@ void executeNodeCli(product, ["echo", "typed package"], { legacyRoutes }).then((
     void message;
     void invalid;
   }
+  projectNodeCliExecution(execution, { resultPresenter, specialTerminalSurface });
   projectNodeCliExecution(execution, { terminalAdapter });
 });
+void runNodeCli(product, ["echo", "typed package"], { resultPresenter, specialTerminalSurface });
 void runNodeCli(product, ["echo", "typed package"], { legacyRoutes, terminalAdapter });
 const invocation = projectInvocation(product, "example.echo", { message: "typed package", format: "full" });
 if (invocation.state !== "ready") throw new Error("packed invocation must be ready");
@@ -426,6 +437,12 @@ assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed", "echo", "7
   commandId: packedRuntime.commandId,
   result: packedRuntime.result,
 });
+assert.deepEqual(await node.runNodeCli(runtimeProduct, ["packed", "echo", "7"], {
+  resultPresenter: { success: ({ result }) => api.textOutput(String(result.value)) },
+}), { exitCode: 0, stdout: "7", stderr: "" });
+assert.deepEqual(await node.runNodeCli(runtimeProduct, ["packed", "echo", "--help"], {
+  specialTerminalSurface: { help: () => api.textOutput("special help\\n") },
+}), { exitCode: 0, stdout: "special help\\n", stderr: "" });
 assert.deepEqual(await node.executeNodeCli(runtimeProduct, ["packed"]), {
   status: "failure",
   failureKind: "usage",
