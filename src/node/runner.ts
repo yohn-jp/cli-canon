@@ -53,11 +53,17 @@ export interface StructuredUsageFailure {
   readonly value?: string;
 }
 
-export interface NodeCliSuccess<Catalog extends CommandCatalog = CommandCatalog> {
-  readonly status: "success";
-  readonly commandId: CommandId<Catalog>;
-  readonly result: CommandResultOutput<Catalog[CommandId<Catalog>]>;
-}
+/**
+ * A validated command result correlated with its command identity: narrowing
+ * `commandId` narrows `result` to that command's result schema output.
+ */
+export type NodeCliSuccess<Catalog extends CommandCatalog = CommandCatalog> = {
+  readonly [Id in CommandId<Catalog>]: {
+    readonly status: "success";
+    readonly commandId: Id;
+    readonly result: CommandResultOutput<Catalog[Id]>;
+  };
+}[CommandId<Catalog>];
 
 export interface NodeCliHelp {
   readonly status: "help";
@@ -401,7 +407,8 @@ function nodeCliExecution<const Catalog extends CommandCatalog>(
   product: HelpProjectionProduct,
 ): NodeCliExecution<Catalog> {
   if (outcome.status === "success") {
-    return { status: "success", commandId: outcome.commandId, result: outcome.result } as NodeCliSuccess<Catalog>;
+    const { route: _route, ...success } = outcome;
+    return success;
   }
   if (outcome.failureKind === "usage") {
     const { code, commandId, option, value } = outcome.usageFailure;
