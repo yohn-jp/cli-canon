@@ -103,18 +103,18 @@ void describe;
 const invalidKind: CommandTreeNodeKind = "alias";
 void invalidKind;
 
+// @ts-expect-error command nodes reference declared command IDs only.
 const invalidCommandLeaf: CommandTreeChildNode<Groups, Commands> = {
   kind: "command",
-  // @ts-expect-error command nodes reference declared command IDs only.
   id: "document",
   route: groups.document.route,
   definition: commands["document.render"],
 };
 void invalidCommandLeaf;
 
+// @ts-expect-error group nodes reference declared group IDs only.
 const invalidGroupNode: CommandTreeChildNode<Groups, Commands> = {
   kind: "group",
-  // @ts-expect-error group nodes reference declared group IDs only.
   id: "document.render",
   route: commands["document.render"].route,
   definition: groups.document,
