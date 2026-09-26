@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -20,11 +20,19 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packDir = mkdtempSync(path.join(os.tmpdir(), "cli-canon-pack-"));
 const consumer = mkdtempSync(path.join(os.tmpdir(), "cli-canon-consumer-"));
 
+// CLI_CANON_TARBALL certifies one already-packed release-candidate artifact instead of packing a new one.
+const suppliedTarball = process.env.CLI_CANON_TARBALL;
+
 try {
-  run("pnpm", ["pack", "--pack-destination", packDir], { cwd: root });
-  const archives = readdirSync(packDir).filter((file) => file.endsWith(".tgz"));
-  assert.equal(archives.length, 1, "pnpm pack must produce one tarball");
-  const tarball = path.resolve(packDir, archives[0]);
+  let tarball;
+  if (suppliedTarball === undefined) {
+    run("pnpm", ["pack", "--pack-destination", packDir], { cwd: root });
+    const archives = readdirSync(packDir).filter((file) => file.endsWith(".tgz"));
+    assert.equal(archives.length, 1, "pnpm pack must produce one tarball");
+    tarball = path.resolve(packDir, archives[0]);
+  } else {
+    tarball = path.resolve(suppliedTarball);
+  }
   const packedFiles = run("tar", ["-tzf", tarball]).stdout.split(/\r?\n/u);
   for (const file of [
     "package/package.json",
@@ -40,6 +48,8 @@ try {
 
   const packedManifest = JSON.parse(run("tar", ["-xOf", tarball, "package/package.json"]).stdout);
   assert.equal(packedManifest.name, "@yohn-jp/cli-canon");
+  const candidateManifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  assert.equal(packedManifest.version, candidateManifest.version, "packed version must match the candidate tree");
   assert.deepEqual(packedManifest.exports["."], {
     types: "./dist/index.d.ts",
     import: "./dist/index.js",
@@ -71,6 +81,10 @@ try {
     ),
   );
 
+  copyFileSync(
+    path.join(testDirectory, "release-candidate-scenarios.mjs"),
+    path.join(consumer, "release-candidate-scenarios.mjs"),
+  );
   for (const filename of ["fixture-scenario.mjs", "fixture-oracle.mjs", "composition-certification.mjs"]) {
     copyFileSync(path.join(testDirectory, "..", "runtime", filename), path.join(consumer, filename));
   }
@@ -407,10 +421,12 @@ import packageMetadata from "./package.json" with { type: "json" };
 import { certifyScenarios, projectNodeTestTap } from "@yohn-jp/cli-canon/testing";
 import { createCertificationScenario } from "./fixture-scenario.mjs";
 import { certifyComposition } from "./composition-certification.mjs";
+import { certifyReleaseCandidate } from "./release-candidate-scenarios.mjs";
 
 assert.equal("certifyScenarios" in api, false, "testing helpers must stay outside the runtime root entrypoint");
 assert.equal("projectNodeTestTap" in api, false, "testing helpers must stay outside the runtime root entrypoint");
 await certifyComposition();
+await certifyReleaseCandidate();
 await certifyScenarios(
   [createCertificationScenario(packageMetadata, ["packed"])],
   [{ id: "packed", context: { api, node } }],
