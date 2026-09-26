@@ -940,6 +940,20 @@ console.log("packed consumer verified");
     cwd: root,
     specifier: new URL("../../dist/index.js", import.meta.url).href,
   });
+
+  if (suppliedTarball === undefined) {
+    const certificationDirectory = mkdtempSync(path.join(os.tmpdir(), "cli-canon-release-candidate-"));
+    try {
+      const certification = run(
+        process.execPath,
+        [path.join(testDirectory, "release-candidate.mjs"), "--out", certificationDirectory],
+        { cwd: root },
+      );
+      process.stdout.write(certification.stdout);
+    } finally {
+      rmSync(certificationDirectory, { recursive: true, force: true });
+    }
+  }
 } finally {
   rmSync(packDir, { recursive: true, force: true });
   rmSync(consumer, { recursive: true, force: true });
