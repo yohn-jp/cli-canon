@@ -36,6 +36,7 @@ try {
   const packedFiles = run("tar", ["-tzf", tarball]).stdout.split(/\r?\n/u);
   for (const file of [
     "package/package.json",
+    "package/README.md",
     "package/dist/index.js",
     "package/dist/index.d.ts",
     "package/dist/node/index.js",
@@ -45,6 +46,34 @@ try {
   ]) {
     assert.ok(packedFiles.includes(file), `packed tarball must contain ${file}`);
   }
+
+  const packedReadme = run("tar", ["-xOf", tarball, "package/README.md"]).stdout;
+  assert.match(packedReadme, /0\.2\.0/u, "packed README must describe the 0.2.0 contract");
+  assert.match(
+    packedReadme,
+    /CLI Canon owns the standard shell/u,
+    "packed README must identify Canon as the standard-shell authority",
+  );
+  assert.match(
+    packedReadme,
+    /NodeCliResultPresenter/u,
+    "packed README must describe the product result-presentation boundary",
+  );
+  assert.match(
+    packedReadme,
+    /NodeCliSpecialTerminalSurface/u,
+    "packed README must describe the explicit special-surface boundary",
+  );
+  assert.doesNotMatch(
+    packedReadme,
+    /json:\s*flag\(["']--json["']\)/u,
+    "packed README must not declare the reserved --json selector as a product field",
+  );
+  assert.doesNotMatch(
+    packedReadme,
+    /terminalAdapter:\s*\{[\s\S]{0,400}?help:\s*\(/u,
+    "packed README must not present terminalAdapter.help as an active migration hook",
+  );
 
   const packedManifest = JSON.parse(run("tar", ["-xOf", tarball, "package/package.json"]).stdout);
   assert.equal(packedManifest.name, "@yohn-jp/cli-canon");
