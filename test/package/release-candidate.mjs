@@ -5,10 +5,13 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 /**
- * Builds one release-candidate tarball from the committed candidate tree, records its identity,
- * and certifies that exact artifact with the packed consumer and the release smoke test.
+ * Builds one release-candidate tarball from the committed candidate tree, or accepts one
+ * already-built candidate tarball, records its identity, and certifies that exact artifact
+ * with the packed consumer and the release smoke test.
  *
- * Usage: node test/package/release-candidate.mjs --out <empty directory>
+ * Usage:
+ *   node test/package/release-candidate.mjs --out <empty directory>
+ *   node test/package/release-candidate.mjs --out <empty directory> --tarball <candidate.tgz>
  */
 
 function run(command, args, options = {}) {
@@ -21,6 +24,9 @@ function run(command, args, options = {}) {
 
 const outIndex = process.argv.indexOf("--out");
 assert.ok(outIndex !== -1 && process.argv[outIndex + 1] !== undefined, "usage: release-candidate.mjs --out <dir>");
+const tarballIndex = process.argv.indexOf("--tarball");
+const suppliedTarball = tarballIndex === -1 ? undefined : process.argv[tarballIndex + 1];
+assert.ok(tarballIndex === -1 || suppliedTarball !== undefined, "--tarball requires a candidate tarball path");
 const outDir = path.resolve(process.argv[outIndex + 1]);
 mkdirSync(outDir, { recursive: true });
 assert.deepEqual(readdirSync(outDir), [], "the artifact directory must start empty");
@@ -33,16 +39,23 @@ const dirty = run("git", ["status", "--porcelain", "--untracked-files=all"], { c
 assert.deepEqual(dirty, [], "the candidate tree must be committed before the artifact is built");
 
 const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-run("pnpm", ["pack", "--pack-destination", outDir], { cwd: root });
-const archives = readdirSync(outDir).filter((file) => file.endsWith(".tgz"));
-assert.deepEqual(archives, [`yohn-jp-cli-canon-${manifest.version}.tgz`], "pnpm pack must produce one tarball");
-const tarball = path.join(outDir, archives[0]);
+const expectedFilename = `yohn-jp-cli-canon-${manifest.version}.tgz`;
+let tarball;
+if (suppliedTarball === undefined) {
+  run("pnpm", ["pack", "--pack-destination", outDir], { cwd: root });
+  const archives = readdirSync(outDir).filter((file) => file.endsWith(".tgz"));
+  assert.deepEqual(archives, [expectedFilename], "pnpm pack must produce one tarball");
+  tarball = path.join(outDir, archives[0]);
+} else {
+  tarball = path.resolve(suppliedTarball);
+  assert.equal(path.basename(tarball), expectedFilename, "supplied tarball name must match the candidate version");
+}
 
 const digest = () => createHash("sha256").update(readFileSync(tarball)).digest("hex");
 const identity = {
   sourceCommit: head,
   version: manifest.version,
-  filename: archives[0],
+  filename: path.basename(tarball),
   bytes: statSync(tarball).size,
   sha256: digest(),
   inventory: run("tar", ["-tvzf", tarball])
