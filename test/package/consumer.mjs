@@ -710,6 +710,161 @@ assert.throws(
   (error) => error instanceof api.CanonConstructionError && error.issues[0]?.code === "FLAG_COLLISION",
 );
 
+class PackedLockedError extends Error {}
+const failureCommands = api.defineCommands({
+  "failure.echo": {
+    route: ["echo"],
+    summary: "Echo a value.",
+    input: { value: api.option("--value", z.string().min(3), { required: true, placement: "anywhere" }) },
+    result: z.object({ value: z.string() }),
+  },
+  "failure.bad": { route: ["bad"], summary: "Return an invalid result.", input: {}, result: z.object({ ok: z.boolean() }) },
+  "failure.fail": { route: ["fail"], summary: "Throw an unmapped error.", input: {}, result: z.object({}) },
+  "failure.lock": { route: ["lock"], summary: "Throw a domain error.", input: {}, result: z.object({}) },
+});
+const failureProduct = api.compileProduct({
+  name: "fixture-cli",
+  commands: failureCommands,
+  handlers: api.bindHandlers(failureCommands)({
+    "failure.echo": ({ value }) => ({ value }),
+    "failure.bad": () => ({ ok: "no" }),
+    "failure.fail": () => {
+      throw new Error("packed boom");
+    },
+    "failure.lock": () => {
+      throw new PackedLockedError("locked");
+    },
+  }),
+});
+const machineFailure = (error) => JSON.stringify({ error }) + "\\n";
+const noCommandDocument = machineFailure({
+  kind: "usage",
+  code: "no-command",
+  message: "no command selected",
+  usage: ["fixture-cli", "<command>"],
+});
+assert.deepEqual(await node.runNodeCli(failureProduct, []), {
+  exitCode: 2,
+  stdout: "",
+  stderr: "error: no command selected\\n\\nUsage: fixture-cli <command>\\n",
+  failureKind: "usage",
+});
+assert.deepEqual(await node.runNodeCli(failureProduct, ["--json"]), {
+  exitCode: 2,
+  stdout: "",
+  stderr: noCommandDocument,
+  failureKind: "usage",
+});
+assert.deepEqual(await node.runNodeCli(failureProduct, ["bad", "--zz", "--json"]), {
+  exitCode: 2,
+  stdout: "",
+  stderr: '{"error":{"kind":"usage","code":"unknown-option","message":"unknown option","usage":["fixture-cli","bad"],"commandId":"failure.bad"}}\\n',
+  failureKind: "usage",
+});
+assert.deepEqual(await node.runNodeCli(failureProduct, ["echo", "--json"]), {
+  exitCode: 2,
+  stdout: "",
+  stderr: machineFailure({
+    kind: "usage",
+    code: "missing-required-option",
+    message: "required option '--value' not specified",
+    usage: ["fixture-cli", "echo", "--value <value>"],
+    commandId: "failure.echo",
+    option: "--value",
+  }),
+  failureKind: "usage",
+});
+assert.deepEqual(await node.runNodeCli(failureProduct, ["--json", "--help=bad"]), {
+  exitCode: 2,
+  stdout: "",
+  stderr: machineFailure({
+    kind: "usage",
+    code: "invalid-help-mode",
+    message: 'unknown help mode "bad"',
+    usage: ["fixture-cli", "<command>"],
+    value: "bad",
+  }),
+  failureKind: "usage",
+});
+const packedValidation = await node.runNodeCli(failureProduct, ["echo", "--value", "ab", "--json"]);
+assert.equal(packedValidation.exitCode, 2);
+assert.equal(packedValidation.stdout, "");
+assert.equal(packedValidation.failureKind, "validation");
+assert.deepEqual(Object.keys(JSON.parse(packedValidation.stderr).error), ["kind", "message"]);
+assert.equal(
+  packedValidation.stderr,
+  machineFailure({
+    kind: "validation",
+    message: (await node.runNodeCli(failureProduct, ["echo", "--value", "ab"])).stderr.slice("INVALID_INPUT: ".length, -1),
+  }),
+);
+assert.equal(
+  (await node.runNodeCli(failureProduct, ["bad", "--json"])).stderr,
+  machineFailure({
+    kind: "handler-result",
+    message: (await node.runNodeCli(failureProduct, ["bad"])).stderr.slice("INVALID_HANDLER_RESULT: ".length, -1),
+  }),
+);
+assert.equal((await node.runNodeCli(failureProduct, ["bad", "--json"])).exitCode, 1);
+assert.deepEqual(await node.runNodeCli(failureProduct, ["fail", "--json"]), {
+  exitCode: 1,
+  stdout: "",
+  stderr: '{"error":{"kind":"unexpected","message":"packed boom"}}\\n',
+  failureKind: "unexpected",
+});
+assert.deepEqual(
+  node.projectNodeCliExecution({ status: "failure", presentation: "machine", failureKind: "unexpected", error: "raw" }),
+  { exitCode: 1, stdout: "", stderr: '{"error":{"kind":"unexpected","message":"raw"}}\\n', failureKind: "unexpected" },
+);
+assert.deepEqual(
+  node.projectNodeCliExecution({
+    status: "failure",
+    presentation: "machine",
+    failureKind: "usage",
+    usageFailure: { code: "unknown-option", parserCode: "commander.unknownOption" },
+    usage: ["fixture-cli", "<command>"],
+  }).stderr,
+  '{"error":{"kind":"usage","code":"unknown-option","message":"unknown option","usage":["fixture-cli","<command>"]}}\\n',
+);
+const packedDomainAdapter = {
+  is: (error) => error instanceof PackedLockedError,
+  map: (error, presentation) => ({ exitCode: 5, stream: "stdout", output: presentation + " " + error.message + "\\n" }),
+};
+assert.deepEqual(await node.runNodeCli(failureProduct, ["lock", "--json"], { domainErrorAdapter: packedDomainAdapter }), {
+  exitCode: 5,
+  stdout: "machine locked\\n",
+  stderr: "",
+  failureKind: "domain",
+});
+assert.deepEqual(
+  await node.runNodeCli(failureProduct, ["--json"], {
+    specialTerminalSurface: { usageFailure: () => api.textOutput("special usage\\n") },
+  }),
+  { exitCode: 2, stdout: "", stderr: noCommandDocument, failureKind: "usage" },
+);
+const noCommandBytes = Buffer.byteLength(noCommandDocument);
+assert.equal(
+  (await node.runNodeCli(failureProduct, ["--json"], { maxOutputBytes: noCommandBytes })).stderr,
+  noCommandDocument,
+);
+assert.deepEqual(await node.runNodeCli(failureProduct, ["--json"], { maxOutputBytes: noCommandBytes - 1 }), {
+  exitCode: 1,
+  stdout: "",
+  stderr: "OUTPUT_BUDGET_EXCEEDED: output uses " + noCommandBytes + " UTF-8 bytes; limit is " + (noCommandBytes - 1) + " bytes.\\n",
+  failureKind: "budget",
+});
+assert.deepEqual(
+  await node.runNodeCli(failureProduct, ["echo", "--value", "abc", "--json"], {
+    resultPresenter: { success: () => api.jsonOutput({ count: 1n }) },
+  }),
+  {
+    exitCode: 1,
+    stdout: "",
+    stderr: "OUTPUT_SERIALIZATION_FAILED: unsupported JSON value at count: bigint\\n",
+    failureKind: "serialization",
+  },
+);
+
 console.log("packed consumer verified");
 `,
   );

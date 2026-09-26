@@ -17,7 +17,7 @@ import {
   type HelpTarget,
   type ParsedHelpMode,
 } from "../projection/help.js";
-import { renderUsageFailure } from "../presentation/index.js";
+import { renderUsageFailure, usageFailureMessage } from "../presentation/index.js";
 import type { DomainErrorAdapter, PresentationMode } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
@@ -176,11 +176,11 @@ function outputPolicyOptions(maxOutputBytes: number | undefined): { readonly max
 }
 
 function failureResult(
-  failureKind: Parameters<typeof cliFailure>[0],
+  failureKind: "domain",
   output: string,
   exitCode: number,
   maxOutputBytes: number | undefined,
-  stream: "stdout" | "stderr" = "stderr",
+  stream: "stdout" | "stderr",
 ): CliOutcome {
   const bounded = textOutput(output, outputPolicyOptions(maxOutputBytes));
   return bounded.status === "success" ? cliFailure(failureKind, bounded.output, exitCode, stream) : bounded;
@@ -302,12 +302,62 @@ function nodeCliHelp(
   };
 }
 
-function usageFailure(
-  failure: StructuredUsageFailure,
-  usage: readonly string[],
+/** A framework-owned failure whose human and machine projections are Canon-owned (CANON §11.5). */
+type FrameworkFailure =
+  | {
+      readonly kind: "usage";
+      readonly usageFailure: StructuredUsageFailure;
+      readonly usage: readonly string[];
+    }
+  | { readonly kind: "validation" | "handler-result" | "unexpected"; readonly error: unknown };
+
+const frameworkFailureExitCodes = { usage: 2, validation: 2, "handler-result": 1, unexpected: 1 } as const;
+
+const frameworkFailureLabels = {
+  validation: "INVALID_INPUT",
+  "handler-result": "INVALID_HANDLER_RESULT",
+  unexpected: "UNEXPECTED",
+} as const;
+
+function frameworkFailureText(failure: FrameworkFailure): string {
+  return failure.kind === "usage"
+    ? renderUsageFailure(failure.usageFailure, failure.usage)
+    : `${frameworkFailureLabels[failure.kind]}: ${errorMessage(failure.error)}\n`;
+}
+
+/** The machine document in the frozen key order; backend diagnostics such as `parserCode` are never projected. */
+function frameworkFailureDocument(failure: FrameworkFailure): { readonly error: Readonly<Record<string, unknown>> } {
+  if (failure.kind !== "usage") return { error: { kind: failure.kind, message: errorMessage(failure.error) } };
+  const { code, commandId, option, value } = failure.usageFailure;
+  return {
+    error: {
+      kind: "usage",
+      code,
+      message: usageFailureMessage(failure.usageFailure),
+      usage: [...failure.usage],
+      ...(commandId === undefined ? {} : { commandId }),
+      ...(option === undefined ? {} : { option }),
+      ...(value === undefined ? {} : { value }),
+    },
+  };
+}
+
+/**
+ * Projects a framework failure for the resolved presentation mode on stderr with its frozen exit code.
+ * The output policy bounds both encodings; a document over budget becomes its text `budget` failure.
+ */
+function projectFrameworkFailure(
+  failure: FrameworkFailure,
+  presentation: PresentationMode,
   maxOutputBytes: number | undefined,
 ): CliOutcome {
-  return failureResult("usage", renderUsageFailure(failure, usage), 2, maxOutputBytes);
+  const bounded =
+    presentation === "machine"
+      ? jsonOutput(frameworkFailureDocument(failure), outputPolicyOptions(maxOutputBytes))
+      : textOutput(frameworkFailureText(failure), outputPolicyOptions(maxOutputBytes));
+  return bounded.status === "success"
+    ? cliFailure(failure.kind, bounded.output, frameworkFailureExitCodes[failure.kind])
+    : bounded;
 }
 
 function silentCommand(name: string): Command {
@@ -590,34 +640,26 @@ export function projectNodeCliExecution<DomainError = never, Catalog extends Com
     return toCliResult(boundedOutcome(outcome, maxOutputBytes));
   }
 
+  const { presentation } = execution;
   if (execution.failureKind === "usage") {
-    const outcome =
-      special?.usageFailure?.(execution.usageFailure) ??
-      usageFailure(execution.usageFailure, execution.usage, maxOutputBytes);
-    return toCliResult(boundedOutcome(outcome, maxOutputBytes));
+    const specialOutcome = special?.usageFailure?.(execution.usageFailure);
+    if (specialOutcome !== undefined) return toCliResult(boundedOutcome(specialOutcome, maxOutputBytes));
+    const { usageFailure, usage } = execution;
+    return toCliResult(projectFrameworkFailure({ kind: "usage", usageFailure, usage }, presentation, maxOutputBytes));
   }
-  if (execution.failureKind === "validation") {
-    return toCliResult(
-      failureResult("validation", `INVALID_INPUT: ${errorMessage(execution.error)}\n`, 2, maxOutputBytes),
-    );
-  }
-  if (execution.failureKind === "handler-result") {
-    return toCliResult(
-      failureResult("handler-result", `INVALID_HANDLER_RESULT: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
-    );
-  }
-  if (execution.failureKind === "unexpected") {
-    return toCliResult(
-      failureResult("unexpected", `UNEXPECTED: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes),
-    );
+  if (execution.failureKind !== "handler-error") {
+    const failure = { kind: execution.failureKind, error: execution.error };
+    return toCliResult(projectFrameworkFailure(failure, presentation, maxOutputBytes));
   }
 
   const adapter = options.domainErrorAdapter;
   if (adapter?.is(execution.error) === true) {
-    const mapped = adapter.map(execution.error, execution.presentation);
+    const mapped = adapter.map(execution.error, presentation);
     return toCliResult(failureResult("domain", mapped.output, mapped.exitCode, maxOutputBytes, mapped.stream));
   }
-  return toCliResult(failureResult("unexpected", `UNEXPECTED: ${errorMessage(execution.error)}\n`, 1, maxOutputBytes));
+  return toCliResult(
+    projectFrameworkFailure({ kind: "unexpected", error: execution.error }, presentation, maxOutputBytes),
+  );
 }
 
 export async function runNodeCli<const Catalog extends CommandCatalog, DomainError = never>(
