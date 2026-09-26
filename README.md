@@ -31,7 +31,6 @@ import {
   bindHandlers,
   compileProduct,
   defineCommands,
-  flag,
   option,
   positional,
   projectInvocation,
@@ -57,7 +56,6 @@ const commands = defineCommands({
       format: option("--format", z.enum(["full", "json"]), {
         valueArity: "optional",
       }),
-      json: flag("--json"),
     },
     result: z.object({ writtenFile: z.string() }),
   },
@@ -79,7 +77,6 @@ const result = await runNodeCli(product, ["document", "render", "input.md", "--o
 const invocation = projectInvocation(product, "document.render", {
   file: "input.md",
   out: "out.html",
-  json: true,
 });
 
 if (invocation.state === "ready") {
@@ -154,21 +151,13 @@ Skill command bindings use the same projection through `skillCommand(...)`; usag
 
 Text help and JSON discovery derive from the same compiled command graph.
 
-For incremental migrations that must preserve an established terminal format, the Node adapter exposes a typed help-presentation hook. Canon still parses the help mode and resolves the target route; the adapter receives that resolved request plus scoped discovery metadata and may only render the product-specific terminal shape:
+CLI Canon owns the standard shell: root no-args, `--help`, `-h`, `--help=<mode>`, `--version`, the `--json` machine-presentation selector, and framework-owned usage/error projection. Do not declare `--json` or `--version` as product command fields; those spellings are reserved and rejected with `FLAG_COLLISION`.
 
-```ts
-import { textOutput } from "@yohn-jp/cli-canon";
-import { runNodeCli } from "@yohn-jp/cli-canon/node";
+Product code owns command-result presentation through `NodeCliResultPresenter` and domain-error semantics through `DomainErrorAdapter`. Both receive the Canon-resolved `presentation: "human" | "machine"` context, so consumers do not inspect argv or serialized output to recover the mode.
 
-await runNodeCli(product, argv, {
-  legacyRoutes,
-  terminalAdapter: {
-    help: ({ mode, request, discovery }) => textOutput(renderProductHelp({ mode, request, discovery })),
-  },
-});
-```
+`NodeCliSpecialTerminalSurface` is reserved for genuine protocol, TTY-interactive, or long-running special surfaces. It is not a compatibility hook for ordinary Help, usage, or JSON error layouts. The deprecated `NodeCliTerminalAdapter` and `legacyRoutes` surfaces remain transition-only; `terminalAdapter.help` and `terminalAdapter.usageFailure` are ignored by the standard 0.2.0 path.
 
-This keeps help-mode parsing, route ownership, discovery composition, and command metadata in CLI Canon while allowing compatibility presentation without parsing Canon-rendered text.
+In machine mode, any valid Help request projects the same canonical JSON discovery source. A bare `--version` is projected from `CompiledProduct.packageMetadata`; `--json --version` returns the machine-readable package identity.
 
 Pass package metadata at composition time when package identity should be projected:
 
@@ -241,6 +230,7 @@ The README is an entry point, not a second architecture authority.
 
 Release notes live under [`docs/releases/`](./docs/releases/).
 
+- [0.2.0](./docs/releases/0.2.0.md) — Canon-first standard shell, correlated Node results, route-scoped Help, and complete type certification.
 - [0.1.7](./docs/releases/0.1.7.md) — typed help-presentation compatibility hook for incremental migrations.
 - [0.1.6](./docs/releases/0.1.6.md) — Canon-owned mixed-migration help/discovery and Node presentation surfaces.
 - [0.1.0](./docs/releases/0.1.0.md) — initial public package release.
