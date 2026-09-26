@@ -14,7 +14,7 @@ const commands = defineCommands({
     input: {
       file: positional(z.string()),
       out: option("--out", z.string(), { required: true }),
-      json: flag("--json"),
+      draft: flag("--draft"),
     },
     result: z.object({ writtenFile: z.string() }),
   },
@@ -51,7 +51,10 @@ const handlers = bindHandlers(commands)({
 const compiledProduct = compileProduct({ name: "fixture", commands, handlers, skills });
 compiledProduct.skills[0]?.id satisfies SkillId<typeof skills> | undefined;
 const projected = projectSkill(compiledProduct, "document.workflow");
-projected.steps[1]?.commandId satisfies "document.render" | undefined;
+const projectedCommand = projected.steps[1];
+if (projectedCommand?.kind === "command") {
+  projectedCommand.commandId satisfies "document.render";
+}
 
 const badSkills = defineSkills({
   broken: {
@@ -76,7 +79,10 @@ const delegatedSkills = defineSkills({
   details: { summary: "Detailed guidance.", steps: [{ kind: "prose", text: "Review the existing result." }] },
 });
 const delegatedProduct = compileProduct({ name: "fixture", commands, handlers, skills: delegatedSkills });
-delegatedProduct.skills[0]?.steps[0]?.skillId satisfies SkillId<typeof delegatedSkills> | undefined;
+const delegatedStep = delegatedProduct.skills[0]?.steps[0];
+if (delegatedStep?.kind === "delegate") {
+  delegatedStep.skillId satisfies SkillId<typeof delegatedSkills>;
+}
 
 const badDelegation = defineSkills({
   workflow: { summary: "Invalid delegation.", steps: [{ kind: "delegate", skillId: "missing" }] },

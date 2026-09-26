@@ -4,15 +4,6 @@
     "noEmit": true,
     "rootDir": "../.."
   },
-  "include": [
-    "contracts.ts",
-    "skill-contracts.ts",
-    "path-canon.ts",
-    "public-contract.ts",
-    "invocation.ts",
-    "command-tree.ts",
-    "runtime.ts",
-    "composition.ts",
-    "../../src/**/*.ts"
-  ]
+  "include": ["./*.ts", "../../src/**/*.ts"],
+  "exclude": ["../../dist", "../../node_modules"]
 }

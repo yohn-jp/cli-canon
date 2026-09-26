@@ -32,7 +32,7 @@ function kit() {
       input: {
         file: positional(z.string(), { metavar: "file", description: "Input file." }),
         out: option("--out", z.string(), { aliases: ["-o"], required: true, metavar: "path", description: "Output." }),
-        json: flag("--json", { aliases: ["-j"], description: "Emit JSON." }),
+        draft: flag("--draft", { aliases: ["-d"], description: "Render a draft." }),
         tag: option("--tag", z.string(), { repeatable: true }),
         level: option("--level", z.string(), { valueArity: "optional" }),
         args: rawArgs(),
@@ -161,7 +161,7 @@ test("leaf command help document derives usage, arguments, options, and examples
     "render",
     "<file>",
     "-o, --out <path>",
-    "[-j, --json]",
+    "[-d, --draft]",
     "[--tag <tag>...]",
     "[--level[=<level>]]",
     "[-- <args...>]",
@@ -172,7 +172,7 @@ test("leaf command help document derives usage, arguments, options, and examples
   ]);
   assert.deepEqual(document.options, [
     { key: "out", kind: "option", label: "-o, --out <path>", description: "Output." },
-    { key: "json", kind: "flag", label: "-j, --json", description: "Emit JSON." },
+    { key: "draft", kind: "flag", label: "-d, --draft", description: "Render a draft." },
     { key: "tag", kind: "option", label: "[--tag <tag>...]" },
     { key: "level", kind: "option", label: "[--level[=<level>]]" },
   ]);
@@ -205,7 +205,7 @@ test("summary mode omits full-only content while full mode renders it", async ()
   assert.deepEqual([summary.arguments, summary.options, summary.examples], [[], [], []]);
 
   const usage =
-    "Usage: kit document render <file> -o, --out <path> [-j, --json] [--tag <tag>...] [--level[=<level>]] [-- <args...>]";
+    "Usage: kit document render <file> -o, --out <path> [-d, --draft] [--tag <tag>...] [--level[=<level>]] [-- <args...>]";
   assert.equal(
     (await runNodeCli(product, ["document", "render", "--help"])).stdout,
     `${usage}\n\nRender a document.\n\nHelp: --help[=full|json]\n`,
@@ -214,7 +214,7 @@ test("summary mode omits full-only content while full mode renders it", async ()
     (await runNodeCli(product, ["document", "render", "--help=full"])).stdout,
     `${usage}\n\nRender a document.\n\nRender one input file to the requested path.\n\n` +
       "Arguments:\n  <file>\tInput file.\n  [-- <args...>]\n" +
-      "Options:\n  -o, --out <path>\tOutput.\n  -j, --json\tEmit JSON.\n  [--tag <tag>...]\n  [--level[=<level>]]\n\n" +
+      "Options:\n  -o, --out <path>\tOutput.\n  -d, --draft\tRender a draft.\n  [--tag <tag>...]\n  [--level[=<level>]]\n\n" +
       "Examples:\n  kit document render in.md -o out.html\n\nHelp: --help[=full|json]\n",
   );
   assert.equal(

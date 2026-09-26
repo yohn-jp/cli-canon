@@ -57,7 +57,12 @@ export async function certifyComposition() {
 
   const resultPresenter = { success: ({ result }) => textOutput(`asset: ${result.name}\n`) };
   const pure = await executeNodeCli(product, ["assets", "inspect", "sample"]);
-  assert.deepEqual(pure, { status: "success", commandId: "assets.inspect", result: { name: "sample" } });
+  assert.deepEqual(pure, {
+    status: "success",
+    commandId: "assets.inspect",
+    result: { name: "sample" },
+    presentation: "human",
+  });
   assert.deepEqual(await runNodeCli(product, ["assets", "inspect", "sample"], { resultPresenter }), {
     exitCode: 0,
     stdout: "asset: sample\n",

@@ -1,13 +1,7 @@
-import type { CompiledField } from "../command/compiler.js";
 import { projectCommandDiscovery, type ProductDiscovery } from "./discovery.js";
 import { renderHelpDocument } from "../presentation/help.js";
-import {
-  helpTargetRoutes,
-  projectHelpDocument,
-  resolveHelpTarget,
-  type HelpModelProduct,
-  type HelpTarget,
-} from "./help-model.js";
+import { parsedHelpFromScan, scanShellArgv } from "./shell-scan.js";
+import { projectHelpDocument, resolveHelpTarget, type HelpModelProduct, type HelpTarget } from "./help-model.js";
 
 export {
   projectHelpDocument,
@@ -38,96 +32,20 @@ export interface ParsedHelpMode {
   readonly invalidMode?: string;
 }
 
-function declaredOptions(product: HelpProjectionProduct): ReadonlyMap<string, CompiledField> {
-  const options = new Map<string, CompiledField>();
-  for (const command of product.commands) {
-    for (const field of command.fields) {
-      if ((field.kind === "option" || field.kind === "flag") && field.flag !== undefined) {
-        options.set(field.flag, field);
-        for (const alias of field.aliases ?? []) options.set(alias, field);
-      }
-    }
-  }
-  return options;
-}
-
-function resolveHelpRequest(product: HelpProjectionProduct, words: readonly string[], mode: HelpMode): HelpRequest {
-  const routes = [...helpTargetRoutes(product)].sort(
-    (left, right) =>
-      right.length - left.length || (left.join(" ") < right.join(" ") ? -1 : left.join(" ") > right.join(" ") ? 1 : 0),
-  );
-  for (let start = 0; start < words.length; start += 1) {
-    for (const route of routes) {
-      if (route.every((segment, offset) => words[start + offset] === segment)) {
-        const target = resolveHelpTarget(product, route);
-        return target?.kind === "command"
-          ? { kind: "command", commandId: target.id, mode }
-          : { kind: "route", route, mode };
-      }
-    }
-  }
-  return { kind: "root", mode };
-}
-
-/** Parses --help modes and resolves their route from canonical and legacy descriptors. */
+/**
+ * Parses --help modes and resolves their target from the resolved command tree.
+ *
+ * Option values are classified by the grammar of the route scope reached so far: before
+ * a command route resolves, only `anywhere` options apply; after it, only the resolved
+ * command's declared fields. Declarations of other commands never change a route's help
+ * intent. Tokens after the first `--` are never help tokens.
+ */
 export function parseHelpMode(
   product: HelpProjectionProduct,
   argv: readonly string[],
   defaultMode?: HelpOutputMode | "text",
 ): ParsedHelpMode | undefined {
-  const delimiter = argv.indexOf("--");
-  const end = delimiter === -1 ? argv.length : delimiter;
-  const options = declaredOptions(product);
-  const routeWords: string[] = [];
-  let detected: { readonly mode: HelpOutputMode; readonly invalidMode?: string } | undefined;
-
-  for (let index = 0; index < end; index += 1) {
-    const token = argv[index];
-    if (token === undefined) continue;
-    if (token === "--help" || token === "-h" || token.startsWith("--help=")) {
-      const value = token.startsWith("--help=") ? token.slice("--help=".length) : undefined;
-      const validValue =
-        value === undefined || value === "summary" || value === "text" || value === "full" || value === "json";
-      detected ??= {
-        mode: value === "full" || value === "json" ? value : "summary",
-        ...(validValue ? {} : { invalidMode: value }),
-      };
-      continue;
-    }
-    if (token === "--") break;
-
-    const flag = token.startsWith("-") ? token.split("=", 1)[0] : undefined;
-    const declaration = flag === undefined ? undefined : options.get(flag);
-    const hasInlineValue = token.includes("=");
-    if (declaration?.kind === "option" && !hasInlineValue) {
-      const next = argv[index + 1];
-      if (
-        declaration.valueArity !== "optional" ||
-        (next !== undefined && (!next.startsWith("-") || /^-\d/u.test(next)))
-      ) {
-        index += 1;
-        continue;
-      }
-    }
-    if (token.startsWith("-")) continue;
-    routeWords.push(token);
-  }
-
-  if (detected === undefined) return undefined;
-  const mode =
-    detected.invalidMode === undefined
-      ? defaultMode === undefined
-        ? detected.mode
-        : defaultMode === "text"
-          ? "summary"
-          : defaultMode
-      : detected.mode;
-  const request = resolveHelpRequest(product, routeWords, mode === "full" ? "full" : "text");
-  return {
-    mode,
-    request,
-    ...(detected.invalidMode === undefined ? {} : { invalidMode: detected.invalidMode }),
-  };
+  return parsedHelpFromScan(scanShellArgv(product, argv), defaultMode);
 }
 
 function requestTarget(product: HelpProjectionProduct, request: HelpRequest): HelpTarget | undefined {

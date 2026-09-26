@@ -1,7 +1,9 @@
 import type { HandlerMap } from "../command/handlers.js";
-import type { CommandCatalog, CommandId, CommandResultOutput, GroupCatalog } from "../command/model.js";
+import type { CommandCatalog, CommandId, CommandResultOutput } from "../command/model.js";
 import type { CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
 import type { CanonicalCommandSource, ComposedCommandTree, DelegatedCommandSource } from "../composition/model.js";
+import type { PresentationMode } from "../output/model.js";
+import type { ProductPackageIdentity } from "../product/identity.js";
 import type { HelpOutputMode, HelpProjectionProduct, ParsedHelpMode } from "../projection/help.js";
 
 /**
@@ -24,8 +26,10 @@ export interface CanonicalCommandRequest {
 
 /** The compiled product surface the semantic runtime consumes. */
 export interface CanonicalRuntimeProduct<Catalog extends CommandCatalog = CommandCatalog> {
-  readonly tree: CommandTreeRootNode<GroupCatalog, Catalog>;
+  readonly tree: CommandTreeRootNode<any, Catalog>;
   readonly handlers: HandlerMap<Catalog>;
+  /** Canonical package identity used by the standard-shell version request. */
+  readonly packageMetadata?: ProductPackageIdentity;
 }
 
 /** Runtime-owned request classifications. Parser/backend diagnostics are never part of this contract. */
@@ -129,24 +133,37 @@ export interface CanonicalArgvRequest<Failure, RootState = unknown> {
   readonly helpFormat?: HelpOutputMode | "text";
 }
 
-/** Semantic outcome of one argv invocation: help intent, a backend grammar failure, or a canonical execution. */
-export type CanonicalArgvOutcome<Catalog extends CommandCatalog = CommandCatalog, Failure = unknown> =
+/** Attaches the invocation's Canon-resolved presentation mode to each outcome member. */
+type WithPresentation<Outcome> = Outcome extends unknown
+  ? Outcome & { readonly presentation: PresentationMode }
+  : never;
+
+/**
+ * Semantic outcome of one argv invocation: help intent, a version request, a backend grammar
+ * failure, or a canonical execution. Every member carries the presentation mode resolved
+ * once by the standard shell before route resolution.
+ */
+export type CanonicalArgvOutcome<Catalog extends CommandCatalog = CommandCatalog, Failure = unknown> = WithPresentation<
   | CanonicalExecutionOutcome<Catalog>
   | { readonly status: "help"; readonly help: ParsedHelpMode }
-  | { readonly status: "failure"; readonly failureKind: "grammar"; readonly grammarFailure: Failure };
+  | { readonly status: "version"; readonly packageMetadata: ProductPackageIdentity }
+  | { readonly status: "failure"; readonly failureKind: "grammar"; readonly grammarFailure: Failure }
+>;
 
 /**
  * The one executor boundary a delegated source crosses for a route it owns.
  *
  * Canon has already resolved the owner and route from the composed tree; `argv`
- * is the remaining argv following the resolved route, verbatim. The delegated
- * source owns its grammar and domain semantics for that argv.
+ * is the remaining argv following the resolved route, verbatim except that Canon
+ * shell `--json` selectors are removed. The delegated source owns its grammar and
+ * domain semantics for that argv, and receives the resolved presentation mode.
  */
 export interface DelegatedCommandRequest<SourceId extends string = string> {
   readonly sourceId: SourceId;
   readonly commandId: string;
   readonly route: readonly [string, ...string[]];
   readonly argv: readonly string[];
+  readonly presentation: PresentationMode;
 }
 
 export type DelegatedCommandExecutor<Result = unknown> = (request: DelegatedCommandRequest) => Result | Promise<Result>;
@@ -171,22 +188,24 @@ export interface ComposedRuntimeProduct<SourceId extends string = string, Result
 /** Semantic outcome of one argv invocation dispatched to exactly one composed owner. */
 export type ComposedArgvOutcome<Failure = unknown, Result = unknown, SourceId extends string = string> =
   | CanonicalArgvOutcome<CommandCatalog, Failure>
-  | {
-      /** The delegated executor returned; its result is owned by the delegated source. */
-      readonly status: "delegated";
-      readonly sourceId: SourceId;
-      readonly commandId: string;
-      readonly route: readonly [string, ...string[]];
-      readonly result: Result;
-    }
-  | {
-      /** The delegated executor threw or rejected. No other source is tried. */
-      readonly status: "failure";
-      readonly failureKind: "delegated-error";
-      readonly sourceId: SourceId;
-      readonly commandId: string;
-      readonly error: unknown;
-    };
+  | WithPresentation<
+      | {
+          /** The delegated executor returned; its result is owned by the delegated source. */
+          readonly status: "delegated";
+          readonly sourceId: SourceId;
+          readonly commandId: string;
+          readonly route: readonly [string, ...string[]];
+          readonly result: Result;
+        }
+      | {
+          /** The delegated executor threw or rejected. No other source is tried. */
+          readonly status: "failure";
+          readonly failureKind: "delegated-error";
+          readonly sourceId: SourceId;
+          readonly commandId: string;
+          readonly error: unknown;
+        }
+    >;
 
 export class CanonicalRequestError extends Error {
   readonly code = "INVALID_CANONICAL_REQUEST" as const;

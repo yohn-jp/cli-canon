@@ -11,7 +11,8 @@ export function renderUsage(usage: HelpDocument["usage"]): string {
   return `Usage: ${usage.join(" ")}`;
 }
 
-function usageFailureMessage(failure: UsageFailureMessage): string {
+/** The Canon message for a structured usage code, shared by the human and machine projections. */
+export function usageFailureMessage(failure: UsageFailureMessage): string {
   switch (failure.code) {
     case "extra-positional-argument":
       return "too many arguments";

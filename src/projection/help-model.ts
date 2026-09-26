@@ -233,17 +233,26 @@ export function resolveHelpTarget(product: HelpModelProduct, route: readonly str
     : { kind: "group", id: node.id, route: node.route };
 }
 
-/** Routes of every group and command help target in canonical tree order. */
-export function helpTargetRoutes(product: HelpModelProduct): readonly (readonly string[])[] {
-  const routes: (readonly string[])[] = [];
+/** A group or command help target together with the declared fields of a command target. */
+export interface HelpTargetScope {
+  readonly target: Exclude<HelpTarget, { readonly kind: "root" }>;
+  readonly fields: readonly CompiledField[];
+}
+
+/** Every group and command help target in canonical tree order, from one resolved tree. */
+export function helpTargetScopes(product: HelpModelProduct): readonly HelpTargetScope[] {
+  const scopes: HelpTargetScope[] = [];
   const visit = (node: HelpNode): void => {
     for (const child of node.children) {
-      routes.push(child.route);
+      scopes.push({
+        target: { kind: child.kind === "command" ? "command" : "group", id: child.id, route: child.route },
+        fields: child.command?.fields ?? [],
+      });
       visit(child);
     }
   };
   visit(buildHelpTree(product).root);
-  return routes;
+  return scopes;
 }
 
 /** Projects the one semantic help document for a target from the canonical tree. */
