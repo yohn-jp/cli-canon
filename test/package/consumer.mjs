@@ -946,7 +946,7 @@ console.log("packed consumer verified");
     try {
       const certification = run(
         process.execPath,
-        [path.join(testDirectory, "release-candidate.mjs"), "--out", certificationDirectory],
+        [path.join(testDirectory, "release-candidate.mjs"), "--out", certificationDirectory, "--tarball", tarball],
         { cwd: root },
       );
       process.stdout.write(certification.stdout);
