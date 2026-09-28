@@ -1,7 +1,12 @@
 import type { HandlerMap } from "../command/handlers.js";
 import type { CommandCatalog, CommandId, CommandResultOutput } from "../command/model.js";
 import type { CommandTreeCommandNode, CommandTreeRootNode } from "../command/tree.js";
-import type { CanonicalCommandSource, ComposedCommandTree, DelegatedCommandSource } from "../composition/model.js";
+import type {
+  CanonicalCommandSource,
+  ComposedCommandNode,
+  ComposedCommandTree,
+  DelegatedCommandSource,
+} from "../composition/model.js";
 import type { PresentationMode } from "../output/model.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
 import type { HelpOutputMode, HelpProjectionProduct, ParsedHelpMode } from "../projection/help.js";
@@ -123,6 +128,17 @@ export interface CanonicalArgvBackend<Failure, RootState = unknown> {
     argv: readonly string[],
     root: RootState,
   ): CanonicalArgvParse<{ readonly input: Readonly<Record<string, unknown>> }, Failure>;
+  /**
+   * Optional composed-path capability: returns the verbatim root-scope argv that the
+   * runtime-resolved delegated command owns through its declared `anywhere` fields, in
+   * argv order, or a grammar failure when a leading occurrence is not declared by that
+   * command. It is called only after the runtime has resolved the delegated owner from the
+   * composed tree and before its executor runs. A backend without it forwards no leading argv.
+   */
+  parseDelegatedLeading?(
+    node: ComposedCommandNode,
+    root: RootState,
+  ): CanonicalArgvParse<{ readonly argv: readonly string[] }, Failure>;
 }
 
 export interface CanonicalArgvRequest<Failure, RootState = unknown> {
@@ -154,9 +170,12 @@ export type CanonicalArgvOutcome<Catalog extends CommandCatalog = CommandCatalog
  * The one executor boundary a delegated source crosses for a route it owns.
  *
  * Canon has already resolved the owner and route from the composed tree; `argv`
- * is the remaining argv following the resolved route, verbatim except that Canon
- * shell `--json` selectors are removed. The delegated source owns its grammar and
- * domain semantics for that argv, and receives the resolved presentation mode.
+ * is the argv the resolved command owns: occurrences of its declared `anywhere`
+ * fields given before the route (verbatim, in argv order), followed by the remaining
+ * argv after the route. Each occurrence appears exactly once, exactly as it would had
+ * it been given right after the route, and Canon shell `--json` selectors are removed.
+ * The delegated source owns its grammar and domain semantics for that argv, and
+ * receives the resolved presentation mode.
  */
 export interface DelegatedCommandRequest<SourceId extends string = string> {
   readonly sourceId: SourceId;

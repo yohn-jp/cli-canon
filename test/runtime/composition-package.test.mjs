@@ -31,8 +31,10 @@ import {
   type ComposedChildNode,
   type ComposedCommandTree,
   type DelegatedCommandSource,
+  type DelegatedCommandRequest,
   type DelegatedGroupDescriptor,
 } from "@yohn-jp/cli-canon";
+import { executeNodeCli, runNodeCli, type NodeDelegatedCommandSource } from "@yohn-jp/cli-canon/node";
 
 const commands = defineCommands({
   "document.render": {
@@ -92,6 +94,49 @@ try {
 } catch (error) {
   if (!(error instanceof CanonConstructionError) || error.issues[0]?.code !== "DUPLICATE_ROUTE") throw error;
 }
+
+// A delegated anywhere field given before its route reaches the delegated executor once,
+// without consumer-side route-first argv normalization.
+const received: DelegatedCommandRequest[] = [];
+const tagged: NodeDelegatedCommandSource = {
+  kind: "delegated",
+  id: "external",
+  commands: [
+    {
+      id: "external.convert",
+      route: ["document", "convert"],
+      summary: "Convert.",
+      fields: [
+        {
+          key: "tag",
+          kind: "option",
+          flag: "--tag",
+          aliases: [],
+          repeatable: true,
+          required: false,
+          valueArity: "required",
+          optionLookingValuePolicy: "consume",
+          placement: "anywhere",
+        },
+      ],
+    },
+  ],
+  execute: (request) => {
+    received.push(request);
+    return { exitCode: 0, stdout: request.argv.join(" ") + "\\n", stderr: "" };
+  },
+};
+const leadingRun = await runNodeCli(product, ["--tag", "a", "--json", "document", "convert", "--tag", "b"], {
+  delegatedSources: [tagged],
+});
+if (leadingRun.stdout !== "--tag a --tag b\\n" || received[0]?.presentation !== "machine") {
+  throw new Error("leading delegated anywhere fields must reach the delegated executor exactly once");
+}
+const unowned = await executeNodeCli(product, ["--tag", "a", "document", "render"], { delegatedSources: [tagged] });
+if (unowned.status !== "failure" || unowned.failureKind !== "usage" || unowned.usageFailure.code !== "unknown-option") {
+  throw new Error("a leading field the resolved owner does not declare must fail before execution");
+}
+if (received.length !== 1) throw new Error("usage failures must not invoke a delegated executor");
 `;
 
 test("packed package exposes generic command-source composition types and runtime", () => {

@@ -471,6 +471,18 @@ export async function executeComposedArgv<
         presentation,
       };
     }
+    // Leading field occurrences are attributed only after the composed tree has resolved the
+    // owner; a leading occurrence the owner does not declare fails before its executor runs.
+    let leading: readonly string[] = [];
+    try {
+      const parsed = request.backend.parseDelegatedLeading?.(node, resolution.root);
+      if (parsed?.status === "failure") {
+        return { status: "failure", failureKind: "grammar", grammarFailure: parsed.failure, presentation };
+      }
+      if (parsed !== undefined) leading = parsed.argv;
+    } catch (error) {
+      return { status: "failure", failureKind: "unexpected", error, presentation };
+    }
     let result: Result;
     try {
       result = await source.execute(
@@ -478,7 +490,7 @@ export async function executeComposedArgv<
           sourceId,
           commandId: node.id,
           route: node.route,
-          argv: Object.freeze([...resolution.tail]),
+          argv: Object.freeze([...leading, ...resolution.tail]),
           presentation,
         }),
       );

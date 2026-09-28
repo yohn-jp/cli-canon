@@ -34,6 +34,7 @@ test("TypeScript lists every intended test/types fixture in the type certificati
     "composition-certification.ts",
     "composition.ts",
     "contracts.ts",
+    "delegated-anywhere.ts",
     "invocation.ts",
     "node-success-correlation.ts",
     "option-looking-value.ts",
