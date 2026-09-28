@@ -324,6 +324,67 @@ function delegatedContributions(
   return contributions;
 }
 
+const RESERVED_SHELL_FLAGS: ReadonlySet<string> = new Set(["--help", "-h", "--version", "--json"]);
+
+/** The token grammar of an `anywhere` field; equal signatures classify leading argv identically. */
+function anywhereSignature(field: CompiledField): string {
+  return JSON.stringify([
+    field.kind,
+    field.flag,
+    field.aliases ?? [],
+    ...(field.kind === "option"
+      ? [
+          field.repeatable === true,
+          field.required === true,
+          field.valueArity ?? "required",
+          field.optionLookingValuePolicy ?? "consume",
+        ]
+      : []),
+  ]);
+}
+
+/**
+ * Leading argv precedes route resolution, so every `anywhere` token must classify identically
+ * across all composed commands. A token declared with a different grammar by another command,
+ * or a delegated `anywhere` token reserved for the Canon standard shell, is ambiguous and fails
+ * construction in canonical route order. Canonical products are already checked by compilation.
+ */
+function checkAnywhereFields(entries: readonly Contribution[], issues: CanonConstructionIssue[]): void {
+  const tokens = new Map<string, { readonly entry: Contribution; readonly key: string; readonly signature: string }>();
+  for (const entry of entries) {
+    for (const field of entry.fields ?? []) {
+      if ((field.kind !== "option" && field.kind !== "flag") || field.placement !== "anywhere") continue;
+      const signature = anywhereSignature(field);
+      for (const token of [field.flag, ...(field.aliases ?? [])]) {
+        if (typeof token !== "string") continue;
+        const where = `${describe(entry)} field ${field.key}`;
+        if (entry.owner.kind === "delegated" && RESERVED_SHELL_FLAGS.has(token)) {
+          issues.push({
+            code: "FLAG_COLLISION",
+            sourceId: entry.owner.sourceId,
+            commandId: entry.id,
+            field: field.key,
+            message: `${where}: ${token} is reserved for the Canon standard shell`,
+          });
+          continue;
+        }
+        const existing = tokens.get(token);
+        if (existing === undefined) {
+          tokens.set(token, { entry, key: field.key, signature });
+        } else if (existing.signature !== signature) {
+          issues.push({
+            code: "FLAG_COLLISION",
+            sourceId: entry.owner.sourceId,
+            commandId: entry.id,
+            field: field.key,
+            message: `${where}: anywhere option ${token} conflicts with ${describe(existing.entry)} field ${existing.key}`,
+          });
+        }
+      }
+    }
+  }
+}
+
 /**
  * Composes canonical and delegated command sources into one resolved tree with
  * explicit, deterministic route ownership. Composition is purely structural:
@@ -438,6 +499,8 @@ export function composeCommandSources<const Sources extends readonly CommandSour
     if (siblings === undefined) children.set(parentId, [entry]);
     else siblings.push(entry);
   }
+
+  checkAnywhereFields(resolved, issues);
 
   if (issues.length > 0) throw new CanonConstructionError(issues);
 

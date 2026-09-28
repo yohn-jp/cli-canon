@@ -237,11 +237,13 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
   command.allowExcessArguments(false);
 }
 
-/** One declaration per `anywhere` flag spelling; the compiler guarantees equal grammar per spelling. */
-function anywhereFields<const Catalog extends CommandCatalog>(product: CompiledProduct<Catalog>): CompiledField[] {
+type AnywhereCommands = readonly { readonly fields: readonly CompiledField[] }[];
+
+/** One declaration per `anywhere` flag spelling; construction guarantees equal grammar per spelling. */
+function anywhereFields(commands: AnywhereCommands): CompiledField[] {
   const seen = new Set<string>();
   const fields: CompiledField[] = [];
-  for (const command of product.commands) {
+  for (const command of commands) {
     for (const field of command.fields) {
       if (
         (field.kind === "option" || field.kind === "flag") &&
@@ -257,11 +259,8 @@ function anywhereFields<const Catalog extends CommandCatalog>(product: CompiledP
   return fields;
 }
 
-function addAnywhereOptions<const Catalog extends CommandCatalog>(
-  program: Command,
-  product: CompiledProduct<Catalog>,
-): void {
-  for (const field of anywhereFields(product)) program.addOption(makeOption(field, false));
+function addAnywhereOptions(program: Command, commands: AnywhereCommands): void {
+  for (const field of anywhereFields(commands)) program.addOption(makeOption(field, false));
 }
 
 function classifyCommanderError(error: CommanderError, commandId?: string): StructuredUsageFailure {
@@ -476,6 +475,48 @@ function commandInput(
   return input;
 }
 
+/** One root-scope option occurrence, identified by the Commander attribute it assigns. */
+interface LeadingOccurrence {
+  readonly key: string;
+  readonly flag: string;
+}
+
+/**
+ * Parses the options accepted at one route scope up to the first operand; only the root
+ * scope accepts the `anywhere` options of `commands`. Occurrences are recorded in argv order.
+ */
+function parseLeadingOptions(
+  name: string,
+  commands: AnywhereCommands,
+  argv: readonly string[],
+): CanonicalArgvParse<
+  { readonly operands: readonly string[]; readonly state: CommanderOptions; readonly occurrences: LeadingOccurrence[] },
+  StructuredUsageFailure
+> {
+  const command = silentCommand(name);
+  addAnywhereOptions(command, commands);
+  const occurrences: LeadingOccurrence[] = [];
+  for (const option of command.options) {
+    const key = option.attributeName();
+    const flag = option.long ?? option.short ?? option.flags;
+    command.on(`option:${option.name()}`, () => occurrences.push({ key, flag }));
+  }
+  let operands: readonly string[] = [];
+  command
+    .passThroughOptions()
+    .argument("[operands...]")
+    .action((values: string[]) => {
+      operands = values;
+    });
+  return parseWith(
+    command,
+    argv,
+    () => ({ operands, state: command.opts<Record<string, unknown>>(), occurrences }),
+    undefined,
+    rejectedOptionValue(anywhereFields(commands), argv, true),
+  );
+}
+
 /** Commander as an argv grammar backend only: it never selects commands, detects help, or decodes values. */
 function commanderBackend<const Catalog extends CommandCatalog>(
   product: CompiledProduct<Catalog>,
@@ -483,23 +524,10 @@ function commanderBackend<const Catalog extends CommandCatalog>(
   const compiledById = new Map<string, CompiledCommand>(product.commands.map((command) => [command.id, command]));
   return {
     parseLeading(scope, argv) {
-      const command = silentCommand(product.name);
-      if (scope.kind === "root") addAnywhereOptions(command, product);
-      let operands: readonly string[] = [];
-      command
-        .passThroughOptions()
-        .argument("[operands...]")
-        .action((values: string[]) => {
-          operands = values;
-        });
-      const rejected = scope.kind === "root" ? rejectedOptionValue(anywhereFields(product), argv, true) : undefined;
-      return parseWith(
-        command,
-        argv,
-        () => ({ operands, state: command.opts<Record<string, unknown>>() }),
-        undefined,
-        rejected,
-      );
+      const parsed = parseLeadingOptions(product.name, scope.kind === "root" ? product.commands : [], argv);
+      return parsed.status === "failure"
+        ? parsed
+        : { status: "parsed", operands: parsed.operands, state: parsed.state };
     },
     parseCommand(node, argv, rootOptions) {
       const compiled = compiledById.get(node.id);
@@ -514,6 +542,86 @@ function commanderBackend<const Catalog extends CommandCatalog>(
         compiled.id,
         rejectedOptionValue(compiled.fields, argv, false),
       );
+    },
+  };
+}
+
+/** Root-scope state of the composed backend. */
+interface ComposedRootState {
+  /** Commander root options consumed by canonical commands exactly as on the canonical-only path. */
+  readonly options: CommanderOptions;
+  /** Root-scope option occurrences in argv order. */
+  readonly occurrences: readonly LeadingOccurrence[];
+  /** The verbatim root-scope option tokens preceding the route, without a terminating `--`. */
+  readonly leading: readonly string[];
+}
+
+function anywhereKeys(commands: AnywhereCommands): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const command of commands) {
+    for (const field of command.fields) {
+      if ((field.kind === "option" || field.kind === "flag") && field.placement === "anywhere" && field.flag) {
+        keys.add(makeOption(field, false).attributeName());
+      }
+    }
+  }
+  return keys;
+}
+
+/** The first leading occurrence the resolved command does not own, as a Canon usage failure. */
+function unownedLeading(
+  occurrences: readonly LeadingOccurrence[],
+  owned: ReadonlySet<string>,
+  commandId: string,
+): StructuredUsageFailure | undefined {
+  const unowned = occurrences.find((occurrence) => !owned.has(occurrence.key));
+  return unowned === undefined ? undefined : { code: "unknown-option", commandId, option: unowned.flag };
+}
+
+/**
+ * The Commander backend for a composed tree. The root scope accepts the `anywhere` fields of
+ * every composed command, whose token grammar composition has proven unambiguous. Leading
+ * occurrences are attributed only after the runtime resolves the owner from the composed tree:
+ * a delegated owner receives the verbatim leading tokens when it declares every occurrence, and
+ * a canonical owner consumes canonical root options exactly as the canonical-only path does.
+ * An occurrence the resolved owner cannot receive is an `unknown-option` usage failure.
+ */
+function composedCommanderBackend<const Catalog extends CommandCatalog>(
+  product: CompiledProduct<Catalog>,
+  commands: AnywhereCommands,
+): CanonicalArgvBackend<StructuredUsageFailure, ComposedRootState> {
+  const canonical = commanderBackend(product);
+  const canonicalKeys = anywhereKeys(product.commands);
+  return {
+    parseLeading(scope, argv) {
+      const scoped = scope.kind === "root" ? commands : [];
+      const parsed = parseLeadingOptions(product.name, scoped, argv);
+      if (parsed.status === "failure") return parsed;
+      const { operands, state: options, occurrences } = parsed;
+      let leading = argv.slice(0, argv.length - operands.length);
+      if (leading.at(-1) === "--") {
+        // A trailing `--` is the option terminator unless the preceding option consumed it as its value.
+        const withoutTerminator = leading.slice(0, -1);
+        const reparsed = parseLeadingOptions(product.name, scoped, withoutTerminator);
+        if (
+          reparsed.status === "parsed" &&
+          reparsed.operands.length === 0 &&
+          JSON.stringify(reparsed.state) === JSON.stringify(options)
+        ) {
+          leading = withoutTerminator;
+        }
+      }
+      return { status: "parsed", operands, state: Object.freeze({ options, occurrences, leading }) };
+    },
+    parseCommand(node, argv, root) {
+      const failure = unownedLeading(root.occurrences, canonicalKeys, node.id);
+      if (failure !== undefined) return { status: "failure", failure };
+      return canonical.parseCommand(node, argv, root.options);
+    },
+    parseDelegatedLeading(node, root) {
+      const failure = unownedLeading(root.occurrences, anywhereKeys([node]), node.id);
+      if (failure !== undefined) return { status: "failure", failure };
+      return { status: "parsed", argv: root.leading };
     },
   };
 }
@@ -651,7 +759,7 @@ async function executeComposedNodeCli<const Catalog extends CommandCatalog>(
     { tree, sources },
     {
       argv,
-      backend: commanderBackend(product),
+      backend: composedCommanderBackend(product, resolvedProjection.commands),
       help: projection,
       ...(options.helpFormat === undefined ? {} : { helpFormat: options.helpFormat }),
     },
