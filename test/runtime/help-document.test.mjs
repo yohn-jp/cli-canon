@@ -247,6 +247,7 @@ test("JSON help is the discovery projection of the same help document", async ()
         id: "document.internal.audit",
         route: ["document", "internal", "audit"],
         summary: "Audit document internals.",
+        prominence: "primary",
         fields: [{ key: "scope", kind: "positional", required: false }],
       },
     ],

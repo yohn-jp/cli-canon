@@ -235,8 +235,8 @@ test("help and discovery order is deterministic across declaration insertion ord
   const expectedDiscovery = {
     name: "fixture",
     commands: [
-      { id: "alpha.show", route: ["alpha", "show"], summary: "Show alpha.", fields: [] },
-      { id: "zeta.run", route: ["zeta", "run"], summary: "Run zeta.", fields: [] },
+      { id: "alpha.show", route: ["alpha", "show"], summary: "Show alpha.", prominence: "primary", fields: [] },
+      { id: "zeta.run", route: ["zeta", "run"], summary: "Run zeta.", prominence: "primary", fields: [] },
     ],
   };
   for (const commands of [
@@ -305,6 +305,7 @@ test("progressive text, full, and JSON help share command canon metadata", async
         id: "document.inspect",
         route: ["document", "inspect"],
         summary: "Inspect an input file.",
+        prominence: "primary",
         description: "Read the file and report the selected detail level.",
         examples: ["fixture document inspect input.txt --format=full"],
         fields: [
@@ -399,6 +400,7 @@ test("architecture example progressive help uses only the Command Canon", async 
         id: "architecture.example",
         route: ["architecture", "example"],
         summary: "Show an architecture example.",
+        prominence: "primary",
         description: "Read one example from the canonical architecture.",
         examples: ["fixture architecture example --format=full"],
         fields: [

@@ -8,6 +8,7 @@ import type {
   FieldDefinition,
   GroupCatalog,
   GroupDefinition,
+  CommandProminence,
   InputDefinition,
   OptionLookingValuePolicy,
   OptionValueArity,
@@ -50,6 +51,8 @@ export interface CompiledCommand<
   readonly route: readonly [string, ...string[]];
   readonly summary: string;
   readonly visibility: "public" | "private";
+  /** Resolved presentation-only help prominence. */
+  readonly prominence: CommandProminence;
   readonly description?: string;
   readonly examples?: readonly string[];
   readonly fields: readonly CompiledField[];
@@ -138,6 +141,7 @@ function snapshotCommandDefinition<Input extends InputDefinition, Result extends
     summary: definition.summary,
     ...(definition.description === undefined ? {} : { description: definition.description }),
     ...(definition.visibility === undefined ? {} : { visibility: definition.visibility }),
+    ...(definition.prominence === undefined ? {} : { prominence: definition.prominence }),
     ...(definition.examples === undefined ? {} : { examples: Object.freeze([...definition.examples]) }),
     input,
     result: definition.result,
@@ -264,6 +268,17 @@ export function compileProduct<
         code: "INVALID_COMMAND_VISIBILITY",
         commandId,
         message: `${commandId}: visibility must be public or private`,
+      });
+    }
+    if (
+      definition.prominence !== undefined &&
+      definition.prominence !== "primary" &&
+      definition.prominence !== "advanced"
+    ) {
+      issues.push({
+        code: "INVALID_PROJECTION",
+        commandId,
+        message: `${commandId}: prominence must be primary or advanced`,
       });
     }
     if (
@@ -441,6 +456,7 @@ export function compileProduct<
       route,
       summary: definition.summary,
       visibility: definition.visibility ?? "public",
+      prominence: definition.prominence ?? "primary",
       ...(definition.description === undefined ? {} : { description: definition.description }),
       ...(definition.examples === undefined ? {} : { examples: definition.examples }),
       fields: fieldsById.get(id) ?? Object.freeze([]),

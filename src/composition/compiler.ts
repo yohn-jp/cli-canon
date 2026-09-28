@@ -1,6 +1,6 @@
 import type { CompiledField, CompiledProduct } from "../command/compiler.js";
 import { CanonConstructionError, type CanonConstructionIssue } from "../command/errors.js";
-import type { CommandVisibility } from "../command/model.js";
+import type { CommandProminence, CommandVisibility } from "../command/model.js";
 import type { CommandTreeChildNode } from "../command/tree.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
 import type { ResolvedCommandProjection } from "../projection/discovery.js";
@@ -30,6 +30,8 @@ interface Contribution {
   readonly route: Route;
   readonly owner: CommandSourceOwner;
   readonly presentation: Presentation;
+  /** Resolved help prominence of a command contribution. */
+  readonly prominence?: CommandProminence;
   readonly fields?: readonly CompiledField[];
 }
 
@@ -169,6 +171,7 @@ function canonicalContributions(
         route: Object.freeze([...command.route]) as unknown as Route,
         owner,
         presentation: presentation(command, command.visibility),
+        prominence: command.prominence,
         fields: command.fields,
       });
     }
@@ -298,6 +301,15 @@ function delegatedContributions(
       });
       valid = false;
     }
+    if (value.prominence !== undefined && value.prominence !== "primary" && value.prominence !== "advanced") {
+      issues.push({
+        code: "INVALID_COMMAND_SOURCE",
+        sourceId,
+        commandId,
+        message: `source ${sourceId}: command ${commandId} prominence must be primary or advanced`,
+      });
+      valid = false;
+    }
     if (!validFields(value.fields)) {
       issues.push({
         code: "INVALID_COMMAND_SOURCE",
@@ -310,6 +322,7 @@ function delegatedContributions(
     if (!valid) continue;
     const command = value as unknown as Parameters<typeof presentation>[0] & {
       readonly route: Route;
+      readonly prominence?: CommandProminence;
       readonly fields: readonly CompiledField[];
     };
     contributions.push({
@@ -318,6 +331,7 @@ function delegatedContributions(
       route: Object.freeze([...command.route]) as unknown as Route,
       owner,
       presentation: presentation(command),
+      prominence: command.prominence ?? "primary",
       fields: command.fields,
     });
   }
@@ -511,7 +525,12 @@ export function composeCommandSources<const Sources extends readonly CommandSour
         const common = { id: entry.id, route: entry.route, owner: entry.owner, ...entry.presentation };
         return entry.kind === "group"
           ? Object.freeze({ kind: "group" as const, ...common, children: build(entry.id) })
-          : Object.freeze({ kind: "command" as const, ...common, fields: freezeFields(entry.fields ?? []) });
+          : Object.freeze({
+              kind: "command" as const,
+              ...common,
+              prominence: entry.prominence ?? "primary",
+              fields: freezeFields(entry.fields ?? []),
+            });
       }),
     );
   }

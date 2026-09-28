@@ -1,5 +1,5 @@
 import type { CompiledField, CompiledProduct } from "../command/compiler.js";
-import type { CommandVisibility } from "../command/model.js";
+import type { CommandProminence, CommandVisibility } from "../command/model.js";
 
 /**
  * Any compiled product, whatever its command, skill, path, and group catalogs.
@@ -40,6 +40,8 @@ export interface DelegatedCommandDescriptor {
   readonly summary: string;
   readonly description?: string;
   readonly visibility?: CommandVisibility;
+  /** Presentation-only help prominence; omitted resolves to `primary`. */
+  readonly prominence?: CommandProminence;
   readonly examples?: readonly string[];
   readonly fields: readonly CompiledField[];
 }
@@ -73,6 +75,8 @@ export interface ComposedCommandNode<SourceId extends string = string> {
   readonly summary: string;
   readonly description?: string;
   readonly visibility: CommandVisibility;
+  /** Resolved presentation-only help prominence from the owning source. */
+  readonly prominence: CommandProminence;
   readonly examples?: readonly string[];
   readonly fields: readonly CompiledField[];
 }

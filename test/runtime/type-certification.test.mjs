@@ -39,6 +39,7 @@ test("TypeScript lists every intended test/types fixture in the type certificati
     "node-success-correlation.ts",
     "option-looking-value.ts",
     "path-canon.ts",
+    "prominence.ts",
     "public-contract.ts",
     "runtime.ts",
     "shell-context.ts",

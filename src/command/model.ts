@@ -5,6 +5,14 @@ export type OptionPlacement = "after-route" | "anywhere";
 export type OptionValueArity = "required" | "optional";
 export type OptionLookingValuePolicy = "consume" | "reject";
 export type CommandVisibility = "public" | "private";
+/**
+ * Presentation-only prominence of a command in human help. `primary` commands
+ * are listed by summary (progressive) help; `advanced` commands are listed only
+ * by full help. Prominence never affects routing, execution, validation,
+ * visibility, authorization, discovery, or Skill references. Omitted resolves to
+ * `primary`.
+ */
+export type CommandProminence = "primary" | "advanced";
 
 export interface PositionalField<Schema extends AnySchema = AnySchema, Required extends boolean = boolean> {
   readonly kind: "positional";
@@ -58,6 +66,8 @@ export interface CommandDefinition<
   readonly summary: string;
   readonly description?: string;
   readonly visibility?: CommandVisibility;
+  /** Human help prominence; omitted resolves to `primary`. */
+  readonly prominence?: CommandProminence;
   readonly examples?: readonly string[];
   readonly input: Input;
   readonly result: Result;
