@@ -300,6 +300,7 @@ helpの意味的authorityは、canonical treeとcompiled command fieldから`pro
 - usageはrouteと宣言済みfield grammarから導出し、手書き文字列として保守しない。
 - groupの内容はgroup宣言から取り、子孫commandから推測しない。
 - `summary`(`--help`)はusage、targetのsummary、childのsummaryを含む。`full`(`--help=full`)はさらにtargetのdescription、arguments、options、childのdescription、examplesを含む。`json`(`--help=json`)は同じdocumentのcommand葉のdiscovery projectionである。
+- command prominence(`primary` | `advanced`、省略時`primary`)はpresentation専用である。`summary` helpは`advanced` commandをchild一覧から省き、`full` helpは含め、`advanced` commandを明示targetとするhelpは通常どおり解決する。JSON help/discoveryは全commandを解決済み`prominence`付きで保持する。`visibility`は公開契約とSkill参照可否を、`prominence`はhuman helpでの目立ち方だけを所有し、routing・実行・検証・認可・discovery・Skillには影響しない。詳細は[CANON.md](./CANON.md) §6.2。
 - bounded legacy route descriptorは最長のproper route prefixを所有する宣言済みgroup、なければrootの配下に置く。legacy routeは宣言済みgroupのrouteを所有できない。
 
 ## 9. Path Canon

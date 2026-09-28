@@ -36,6 +36,7 @@ export const certificationOracle = {
         id: "example.echo",
         route: ["echo"],
         summary: "Echo a message.",
+        prominence: "primary",
         description: "Write the supplied message and its optional annotations.",
         examples: ["fixture-cli echo hello --format=full"],
         fields: [
@@ -66,6 +67,7 @@ export const certificationOracle = {
           id: "example.echo",
           route: ["echo"],
           summary: "Echo a message.",
+          prominence: "primary",
           description: "Write the supplied message and its optional annotations.",
           examples: ["fixture-cli echo hello --format=full"],
           fields: [

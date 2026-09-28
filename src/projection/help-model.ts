@@ -38,9 +38,10 @@ export type HelpTarget =
 /**
  * Human help detail level of one help document.
  *
- * - `summary`: usage, target summary, and child summaries.
+ * - `summary`: usage, target summary, and child summaries of groups and
+ *   `primary` commands; `advanced` command children are omitted.
  * - `full`: `summary` plus target description, arguments, options, child
- *   descriptions, and examples.
+ *   descriptions, examples, and `advanced` command children.
  *
  * JSON help is not a document mode: it is the discovery projection of the same
  * document's `commands`.
@@ -268,7 +269,10 @@ export function projectHelpDocument(
   }
   const full = mode === "full";
   const fields = node.command?.fields ?? [];
-  const children = node.children.map((child): HelpChildEntry => ({
+  // Prominence is presentation-only: summary help omits advanced command children
+  // from the listing, while full help, explicit targets, and `commands` keep them.
+  const listed = full ? node.children : node.children.filter((child) => child.command?.prominence !== "advanced");
+  const children = listed.map((child): HelpChildEntry => ({
     kind: child.kind === "group" ? "group" : "command",
     id: child.id,
     route: child.route,

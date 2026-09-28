@@ -1,6 +1,6 @@
 import type { ProjectionCommandSource } from "./source.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
-import type { OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
+import type { CommandProminence, OptionLookingValuePolicy, OptionValueArity } from "../command/model.js";
 import type { CompiledField } from "../command/compiler.js";
 import type { HelpTreeSource } from "./help-model.js";
 import { CanonConstructionError, type CanonConstructionIssue } from "../command/errors.js";
@@ -9,6 +9,8 @@ export interface CommandDiscovery {
   readonly id: string;
   readonly route: readonly string[];
   readonly summary: string;
+  /** Resolved presentation-only help prominence; discovery retains every prominence. */
+  readonly prominence: CommandProminence;
   readonly description?: string;
   readonly examples?: readonly string[];
   readonly fields: readonly {
@@ -117,6 +119,7 @@ export function projectCommandDiscovery(
       id: command.id,
       route: [...command.route],
       summary: command.summary,
+      prominence: command.prominence ?? "primary",
       ...(command.description === undefined ? {} : { description: command.description }),
       ...(command.examples === undefined ? {} : { examples: [...command.examples] }),
       fields: command.fields.map((field) => ({
