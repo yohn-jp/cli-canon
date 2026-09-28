@@ -227,6 +227,7 @@ The README is an entry point, not a second architecture authority.
 
 Release notes live under [`docs/releases/`](./docs/releases/).
 
+- [0.2.1](./docs/releases/0.2.1.md) — fail-closed option values, delegated anywhere fields, and progressive command prominence.
 - [0.2.0](./docs/releases/0.2.0.md) — Canon-first standard shell, correlated Node results, route-scoped Help, and complete type certification.
 - [0.1.7](./docs/releases/0.1.7.md) — typed help-presentation compatibility hook for incremental migrations.
 - [0.1.6](./docs/releases/0.1.6.md) — Canon-owned mixed-migration help/discovery and Node presentation surfaces.
