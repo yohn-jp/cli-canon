@@ -128,12 +128,9 @@ CLI Canon supports:
 
 Unsupported grammar fails closed rather than falling back to a second parser.
 
-Current explicit limits:
+Current explicit limit: `orderedOptionGroups` are rejected as `UNSUPPORTED_GRAMMAR`.
 
-- `orderedOptionGroups` are rejected as `UNSUPPORTED_GRAMMAR`;
-- `optionLookingValuePolicy: "reject"` is rejected as `UNSUPPORTED_GRAMMAR`.
-
-The default option-looking-value behavior remains Commander's consume semantics.
+The default `optionLookingValuePolicy: "consume"` binds the next token as a required option value even when it looks like an option. With `optionLookingValuePolicy: "reject"`, Canon never binds a separately spelled option-looking token (a token starting with `-` other than the `^-\d` negative-number form such as `-1`) as the value: the invocation fails with the structured `missing-option-value` usage failure, and the token stays visible to standard shell resolution, so `--help` still selects help and `--json` still selects machine presentation. The attached form `--flag=--value` is always an explicit value.
 
 ## Invocation Canon
 

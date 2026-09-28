@@ -12,7 +12,9 @@ export interface ShellHelpToken {
  * One classification of invocation argv into Canon shell tokens.
  *
  * `argv` is the input argv with every scanned `--json` selector removed; all other
- * tokens, including Help tokens and every token after `--`, are kept verbatim.
+ * tokens, including Help tokens and every token after `--`, are kept verbatim. A
+ * selector at the value position of a `reject`-policy required option still selects
+ * machine presentation but is kept, so argv grammar observes the missing value.
  */
 export interface ShellScan {
   readonly argv: readonly string[];
@@ -26,7 +28,31 @@ export interface ShellScan {
 type OptionTable = ReadonlyMap<string, CompiledField | null>;
 
 function sameArity(left: CompiledField, right: CompiledField): boolean {
-  return left.kind === right.kind && (left.kind !== "option" || left.valueArity === right.valueArity);
+  return (
+    left.kind === right.kind &&
+    (left.kind !== "option" ||
+      (left.valueArity === right.valueArity && left.optionLookingValuePolicy === right.optionLookingValuePolicy))
+  );
+}
+
+/**
+ * Whether a token at an option-value position is option-looking. Tokens matching the
+ * `^-\d` negative-number convention (for example `-1`) are value-looking.
+ */
+export function isOptionLookingToken(token: string): boolean {
+  return token.startsWith("-") && !/^-\d/u.test(token);
+}
+
+/**
+ * Whether a separately spelled (not `--flag=value`) option consumes the following token
+ * as its value. Optional values and `optionLookingValuePolicy: "reject"` never consume an
+ * option-looking token; a `consume` required value always takes the next token.
+ */
+export function optionConsumesNextToken(declaration: CompiledField, next: string | undefined): boolean {
+  if (declaration.valueArity === "optional" || declaration.optionLookingValuePolicy === "reject") {
+    return next !== undefined && !isOptionLookingToken(next);
+  }
+  return true;
 }
 
 function optionTable(fields: Iterable<CompiledField>): OptionTable {
@@ -69,7 +95,9 @@ function resolveHelpScope(scopes: readonly HelpTargetScope[], words: readonly st
  * Option values are classified by the grammar of the route scope reached so far: before
  * a command route resolves, only `anywhere` options apply; after it, only the resolved
  * command's declared fields. A token consumed as a declared option value is never a
- * shell token, and tokens after the first `--` are never shell tokens.
+ * shell token, and tokens after the first `--` are never shell tokens. A required value
+ * declared with `optionLookingValuePolicy: "reject"` never consumes an option-looking
+ * token, so that token stays visible to shell classification.
  */
 export function scanShellArgv(product: HelpModelProduct, argv: readonly string[]): ShellScan {
   const delimiter = argv.indexOf("--");
@@ -82,13 +110,16 @@ export function scanShellArgv(product: HelpModelProduct, argv: readonly string[]
   let scope: HelpTargetScope | undefined;
   const routeWords: string[] = [];
   const selectors = new Set<number>();
+  let json = false;
+  let rejectedValueIndex: number | undefined;
   let help: ShellHelpToken | undefined;
 
   for (let index = 0; index < end; index += 1) {
     const token = argv[index];
     if (token === undefined) continue;
     if (token === "--json") {
-      selectors.add(index);
+      json = true;
+      if (index !== rejectedValueIndex) selectors.add(index);
       continue;
     }
     if (token === "--help" || token === "-h" || token.startsWith("--help=")) {
@@ -106,14 +137,11 @@ export function scanShellArgv(product: HelpModelProduct, argv: readonly string[]
     const declaration = flag === undefined ? undefined : options.get(flag);
     const hasInlineValue = token.includes("=");
     if (declaration?.kind === "option" && !hasInlineValue) {
-      const next = argv[index + 1];
-      if (
-        declaration.valueArity !== "optional" ||
-        (next !== undefined && (!next.startsWith("-") || /^-\d/u.test(next)))
-      ) {
+      if (optionConsumesNextToken(declaration, argv[index + 1])) {
         index += 1;
         continue;
       }
+      if (declaration.valueArity !== "optional") rejectedValueIndex = index + 1;
     }
     if (token.startsWith("-")) continue;
     routeWords.push(token);
@@ -126,7 +154,7 @@ export function scanShellArgv(product: HelpModelProduct, argv: readonly string[]
 
   return {
     argv: selectors.size === 0 ? argv : argv.filter((_token, index) => !selectors.has(index)),
-    json: selectors.size > 0,
+    json,
     ...(help === undefined ? {} : { help }),
     ...(scope === undefined ? {} : { scope }),
   };

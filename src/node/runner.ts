@@ -18,6 +18,7 @@ import {
   type ParsedHelpMode,
 } from "../projection/help.js";
 import { renderUsageFailure, usageFailureMessage } from "../presentation/index.js";
+import { isOptionLookingToken, optionConsumesNextToken } from "../projection/shell-scan.js";
 import type { DomainErrorAdapter, PresentationMode } from "../output/model.js";
 import type { CliOutcome, CliResult } from "../output/model.js";
 import type { ProductPackageIdentity } from "../product/identity.js";
@@ -236,11 +237,10 @@ function addInputSyntax(command: Command, compiled: CompiledCommand): void {
   command.allowExcessArguments(false);
 }
 
-function addAnywhereOptions<const Catalog extends CommandCatalog>(
-  program: Command,
-  product: CompiledProduct<Catalog>,
-): void {
+/** One declaration per `anywhere` flag spelling; the compiler guarantees equal grammar per spelling. */
+function anywhereFields<const Catalog extends CommandCatalog>(product: CompiledProduct<Catalog>): CompiledField[] {
   const seen = new Set<string>();
+  const fields: CompiledField[] = [];
   for (const command of product.commands) {
     for (const field of command.fields) {
       if (
@@ -250,10 +250,18 @@ function addAnywhereOptions<const Catalog extends CommandCatalog>(
       ) {
         if (seen.has(field.flag)) continue;
         seen.add(field.flag);
-        program.addOption(makeOption(field, false));
+        fields.push(field);
       }
     }
   }
+  return fields;
+}
+
+function addAnywhereOptions<const Catalog extends CommandCatalog>(
+  program: Command,
+  product: CompiledProduct<Catalog>,
+): void {
+  for (const field of anywhereFields(product)) program.addOption(makeOption(field, false));
 }
 
 function classifyCommanderError(error: CommanderError, commandId?: string): StructuredUsageFailure {
@@ -369,12 +377,61 @@ function silentCommand(name: string): Command {
   return command;
 }
 
+/**
+ * Enforces Canon `optionLookingValuePolicy: "reject"` before Commander, which always
+ * consumes the token after a required-value option. Returns the spelling of the first
+ * separately spelled reject-policy option followed by an option-looking token; that
+ * token is never bound as data. Attached `--flag=value` forms are explicit values.
+ * With `stopAtOperand`, scanning ends at the first operand, as in pass-through parsing.
+ */
+function rejectedOptionValue(
+  fields: Iterable<CompiledField>,
+  argv: readonly string[],
+  stopAtOperand: boolean,
+): string | undefined {
+  const declarations = new Map<string, CompiledField>();
+  for (const field of fields) {
+    if (field.kind !== "option" && field.kind !== "flag") continue;
+    for (const spelling of [field.flag, ...(field.aliases ?? [])]) {
+      if (spelling !== undefined) declarations.set(spelling, field);
+    }
+  }
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === undefined || token === "--") break;
+    if (!isOptionLookingToken(token)) {
+      if (stopAtOperand) break;
+      continue;
+    }
+    const declaration = declarations.get(token);
+    if (declaration?.kind !== "option") continue;
+    const next = argv[index + 1];
+    if (
+      declaration.valueArity !== "optional" &&
+      declaration.optionLookingValuePolicy === "reject" &&
+      next !== undefined &&
+      isOptionLookingToken(next)
+    ) {
+      return token;
+    }
+    if (optionConsumesNextToken(declaration, next)) index += 1;
+  }
+  return undefined;
+}
+
 function parseWith<Value extends object>(
   command: Command,
   argv: readonly string[],
   read: () => Value,
   commandId?: string,
+  rejected?: string,
 ): CanonicalArgvParse<Value, StructuredUsageFailure> {
+  if (rejected !== undefined) {
+    return {
+      status: "failure",
+      failure: { code: "missing-option-value", ...(commandId === undefined ? {} : { commandId }), option: rejected },
+    };
+  }
   try {
     command.parse([...argv], { from: "user" });
   } catch (error) {
@@ -435,7 +492,14 @@ function commanderBackend<const Catalog extends CommandCatalog>(
         .action((values: string[]) => {
           operands = values;
         });
-      return parseWith(command, argv, () => ({ operands, state: command.opts<Record<string, unknown>>() }));
+      const rejected = scope.kind === "root" ? rejectedOptionValue(anywhereFields(product), argv, true) : undefined;
+      return parseWith(
+        command,
+        argv,
+        () => ({ operands, state: command.opts<Record<string, unknown>>() }),
+        undefined,
+        rejected,
+      );
     },
     parseCommand(node, argv, rootOptions) {
       const compiled = compiledById.get(node.id);
@@ -443,7 +507,13 @@ function commanderBackend<const Catalog extends CommandCatalog>(
       const command = silentCommand(product.name);
       addInputSyntax(command, compiled);
       command.action(() => {});
-      return parseWith(command, argv, () => ({ input: commandInput(compiled, command, rootOptions) }), compiled.id);
+      return parseWith(
+        command,
+        argv,
+        () => ({ input: commandInput(compiled, command, rootOptions) }),
+        compiled.id,
+        rejectedOptionValue(compiled.fields, argv, false),
+      );
     },
   };
 }

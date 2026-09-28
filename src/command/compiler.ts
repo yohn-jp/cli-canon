@@ -370,14 +370,6 @@ export function compileProduct<
             message: `${commandId}.${fieldKey}: ${candidate} is reserved for the Canon standard shell`,
           });
         }
-        if (field.kind === "option" && field.optionLookingValuePolicy === "reject") {
-          issues.push({
-            code: "UNSUPPORTED_GRAMMAR",
-            commandId,
-            field: fieldKey,
-            message: `${commandId}.${fieldKey}: Commander consumes option-looking tokens as required option values`,
-          });
-        }
         if ((field.kind === "option" || field.kind === "flag") && field.placement === "anywhere") {
           const current = { commandId, fieldKey, signature: signature(field) };
           const existing = anywhereFlags.get(candidate);
