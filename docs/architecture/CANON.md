@@ -279,7 +279,7 @@ M0 deliberately does not admit Nawabari-style ordered repeated option groups suc
 --resource a --mode write --resource b --mode read
 ```
 
-M0 also retains Commander required-value behavior in which an option-looking token may be consumed as the required value. Products with a different established contract require an explicit later grammar primitive before migration.
+The default `optionLookingValuePolicy: "consume"` retains the M0 required-value behavior in which an option-looking token may be consumed as the required value. `optionLookingValuePolicy: "reject"` is the Canon-owned primitive for products with a fail-closed contract: a separately spelled option-looking token (any token starting with `-` except the `^-\d` negative-number form) is never bound as that value, the invocation fails with the structured `missing-option-value` usage failure, and the token stays visible to standard shell classification. Attached `--flag=value` forms remain explicit values. The shell scan and the Node argv backend enforce the policy from compiled field metadata before Commander can consume the token.
 
 ## 10. Projection rule
 

@@ -523,7 +523,7 @@ test("compiled command definitions and handler bindings snapshot their authoring
   assert.equal(Object.isFrozen(product.handlers), true);
 });
 
-test("unsupported ordered groups and option-looking-value rejection fail during construction", () => {
+test("unsupported ordered groups fail during construction while option-looking-value rejection compiles", () => {
   const ordered = defineCommands({
     apply: {
       route: ["apply"],
@@ -553,11 +553,11 @@ test("unsupported ordered groups and option-looking-value rejection fail during 
       result: z.object({}),
     },
   });
-  assert.throws(
-    () => compileProduct({ name: "fixture", commands: optionLooking, handlers: { run: () => ({}) } }),
-    (error) =>
-      error instanceof CanonConstructionError &&
-      error.issues.some((issue) => issue.code === "UNSUPPORTED_GRAMMAR" && issue.field === "value"),
+  const product = compileProduct({ name: "fixture", commands: optionLooking, handlers: { run: () => ({}) } });
+  assert.equal(product.commands[0]?.fields.find((field) => field.key === "value")?.optionLookingValuePolicy, "reject");
+  assert.equal(
+    projectDiscovery(product).commands[0]?.fields.find((field) => field.key === "value")?.optionLookingValuePolicy,
+    "reject",
   );
 });
 
